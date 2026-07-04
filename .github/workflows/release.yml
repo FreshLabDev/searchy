@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build image and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve build metadata
+        id: meta
+        run: |
+          version="${GITHUB_REF_NAME}"
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$GITHUB_OUTPUT"
+          # Tags carrying a pre-release suffix (-alpha/-beta/-rc) are marked as
+          # GitHub pre-releases.
+          if printf '%s' "${version}" | grep -q '-'; then
+            echo "prerelease=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Lowercase image name
+        id: image
+        run: echo "repo=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_OUTPUT"
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          version="${GITHUB_REF_NAME}"
+          notes_file="$(mktemp)"
+          # CHANGELOG headings are plain "## vX.Y.Z - <date>". Match by literal
+          # prefix AND a boundary (space or end-of-line) so e.g. "## v0.1.0" does
+          # not capture "## v0.1.0-alpha.1".
+          awk -v ver="## ${version}" '
+            index($0, ver) == 1 && (length($0) == length(ver) || substr($0, length(ver) + 1, 1) == " ") { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md >"${notes_file}"
+          if [ ! -s "${notes_file}" ]; then
+            printf 'Release %s\n' "${GITHUB_REF_NAME}" >"${notes_file}"
+          fi
+          echo "file=${notes_file}" >>"$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.repo }}:${{ steps.meta.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.meta.outputs.date }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flags=""
+          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+            flags="--prerelease"
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file "${{ steps.changelog.outputs.file }}" \
+            ${flags}

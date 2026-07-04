@@ -1,0 +1,18 @@
+# Independent SearXNG stack on WS04 (/opt/stacks/searxng).
+# Reachable only on the shared external network `searchy_net` as host `searxng`.
+# Not published to the host — internal use by the searchy bot only.
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+    restart: unless-stopped
+    networks:
+      - searchy_net
+
+networks:
+  searchy_net:
+    external: true

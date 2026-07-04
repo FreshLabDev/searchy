@@ -1,0 +1,53 @@
+# searchy bot stack on WS04 (/opt/stacks/searchy): the Go bot + its Postgres.
+# The bot talks to the independent SearXNG stack over the shared external network
+# `searchy_net` (host `searxng`), and to its own Postgres (host `searchy-db`).
+# Outbound only — no published ports (long polling to api.telegram.org).
+services:
+  bot:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: searchy-bot:local
+    container_name: searchy-bot
+    env_file: .env
+    environment:
+      SEARXNG_URL: http://searxng:8080
+      HEALTH_ADDR: ":8081"
+      DATABASE_URL: postgres://searchy:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@searchy-db:5432/searchy?sslmode=disable
+    depends_on:
+      searchy-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - searchy_net
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/searchy", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  searchy-db:
+    image: postgres:17-alpine
+    container_name: searchy-db
+    environment:
+      POSTGRES_USER: searchy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: searchy
+    volumes:
+      - searchy-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - searchy_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U searchy -d searchy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  searchy-db-data:
+
+networks:
+  searchy_net:
+    external: true

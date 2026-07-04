@@ -1,0 +1,60 @@
+# Minimal SearXNG config for a PRIVATE, bot-only instance.
+# Key points for the bot to work:
+#   - `formats` MUST include `json` (off by default) or format=json returns 403.
+#   - `limiter: false` because this instance is reachable only on the internal
+#     Docker network. If you ever expose it publicly, set limiter: true and wire
+#     a Valkey/Redis service (see SearXNG docs) instead of leaving it off.
+# After editing this file, RESTART the searxng container.
+
+use_default_settings: true
+
+general:
+  instance_name: "searchy"
+  debug: false
+  # Don't advertise as a public instance (also relaxes some bot heuristics).
+  public_instance: false
+
+server:
+  # The official image's entrypoint replaces the literal "ultrasecretkey" with
+  # the SEARXNG_SECRET env var at startup — keep this sentinel value here.
+  secret_key: "ultrasecretkey"
+  limiter: false
+  image_proxy: false
+  # GET makes ad-hoc API calls and caching simpler.
+  method: "GET"
+
+search:
+  safe_search: 0          # show everything — no safe search
+  formats:
+    - html
+    - json
+  autocomplete: ""
+
+outgoing:
+  # Direct egress (Tor removed per user — back to fast ~0.8s). Language stays
+  # neutral via language=all in the bot's query. Tight per-engine budget so a
+  # single slow engine can't stall the first result (engines answer in 0.5-1.0s;
+  # caps the slow tail at ~2s).
+  request_timeout: 2.0
+  max_request_timeout: 3.0
+  pool_connections: 200
+  pool_maxsize: 100
+  enable_http2: false
+
+# Disable engines that constantly fail (crash the parser, 403, or rate-limit) so
+# they stop adding latency and log noise. Cross-platform video coverage stays
+# strong via the remaining engines: bing/google/duckduckgo videos (meta — index
+# YouTube, TikTok, Vimeo, news, etc.), youtube, dailymotion, sepiasearch (PeerTube).
+engines:
+  - name: brave.images
+    disabled: true
+  - name: brave.videos
+    disabled: true
+  - name: google images
+    disabled: true
+  - name: vimeo
+    disabled: true
+  - name: wikicommons.images
+    disabled: true
+  - name: wikicommons.videos
+    disabled: true

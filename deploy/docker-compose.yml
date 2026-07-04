@@ -1,0 +1,38 @@
+# Media-search bot + self-hosted SearXNG.
+#
+# SearXNG is NOT published to the host — it is reachable only on the internal
+# Docker network (the bot talks to http://searxng:8080). With the limiter
+# disabled this is the simplest, reliable "private instance" posture. If you
+# ever expose SearXNG publicly, turn the limiter back on and add a Valkey/Redis
+# service (see SearXNG docs) — do not expose it limiter-off.
+services:
+  bot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file: ../.env
+    environment:
+      SEARXNG_URL: http://searxng:8080
+      HEALTH_ADDR: ":8081"
+    depends_on:
+      searxng:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/searchy", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  searxng:
+    # STRONGLY pin a dated tag in .env (SEARXNG_TAG=2026.6.x-...). SearXNG ships
+    # frequent builds and engine scrapers/config break between them; :latest can
+    # silently change behaviour. Find current tags at hub.docker.com/r/searxng/searxng/tags
+    image: searxng/searxng:${SEARXNG_TAG:-latest}
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+    restart: unless-stopped
+    # Intentionally no `ports:` — internal network only.
