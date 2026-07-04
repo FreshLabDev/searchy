@@ -82,7 +82,16 @@ jobs:
           if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
             flags="--prerelease"
           fi
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes-file "${{ steps.changelog.outputs.file }}" \
-            ${flags}
+          # Idempotent: update the release if it already exists (e.g. created
+          # manually or on a re-run), otherwise create it.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file "${{ steps.changelog.outputs.file }}" \
+              ${flags}
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file "${{ steps.changelog.outputs.file }}" \
+              ${flags}
+          fi
