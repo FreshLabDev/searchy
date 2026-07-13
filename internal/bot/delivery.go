@@ -184,8 +184,10 @@ func parseMode(value string) models.ParseMode {
 	return ""
 }
 
-func operationMarkup(buttons []vidobridge.Button) *models.InlineKeyboardMarkup {
+func operationMarkup(buttons []vidobridge.Button) models.ReplyMarkup {
 	if len(buttons) == 0 {
+		// ReplyMarkup is an interface. Returning a typed nil pointer serializes as
+		// reply_markup=null, which the local Bot API rejects instead of omitting.
 		return nil
 	}
 	rows := make([][]models.InlineKeyboardButton, 0, len(buttons))
