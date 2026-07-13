@@ -253,6 +253,14 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 		if token != "" && sent != nil {
 			if err := h.vido.BindIntentMessage(ctx, token, user.ID, chatID, sent.ID); err != nil {
 				h.log.Warn("bind vido card failed", "err", err)
+				// An unbound token is only chat-bound and must not remain on the
+				// card. Keep the source button while removing the unsafe callback.
+				if _, editErr := b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
+					ChatID: chatID, MessageID: sent.ID,
+					ReplyMarkup: videoButtons(r, lang, downloadButton{}),
+				}); editErr != nil {
+					h.log.Warn("remove unbound vido action failed", "err", editErr)
+				}
 			}
 		}
 	default: // image

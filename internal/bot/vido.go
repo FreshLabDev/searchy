@@ -41,6 +41,8 @@ func (h *Handlers) inlineDownloadURLs(ctx context.Context, user *models.User, re
 		return nil
 	}
 	urls := make(map[string]string)
+	bridgeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	var mu sync.Mutex
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
@@ -55,10 +57,10 @@ func (h *Handlers) inlineDownloadURLs(ctx context.Context, user *models.User, re
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
-			case <-ctx.Done():
+			case <-bridgeCtx.Done():
 				return
 			}
-			token, err := h.vido.MintIntent(ctx, vidobridge.Intent{
+			token, err := h.vido.MintIntent(bridgeCtx, vidobridge.Intent{
 				OwnerUserID:   user.ID,
 				Kind:          "video",
 				DeliveryMode:  "vido_dm",
@@ -87,7 +89,9 @@ func (h *Handlers) mintChatDownload(ctx context.Context, user *models.User, resu
 	if h.vido == nil || !h.vido.Ready() || user == nil || result.PageURL == "" {
 		return "", errors.New("vido bridge unavailable")
 	}
-	return h.vido.MintIntent(ctx, vidobridge.Intent{
+	bridgeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return h.vido.MintIntent(bridgeCtx, vidobridge.Intent{
 		OwnerUserID:   user.ID,
 		Kind:          "video",
 		DeliveryMode:  "searchy_chat",
@@ -113,7 +117,13 @@ func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *model
 		return
 	}
 	msg := cq.Message.Message
-	state, err := h.vido.Enqueue(ctx, vidobridge.EnqueueArgs{
+	enqueue := h.vido.Enqueue
+	if kind == "retry" {
+		enqueue = h.vido.EnqueueRetry
+	}
+	bridgeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	state, err := enqueue(bridgeCtx, vidobridge.EnqueueArgs{
 		Token:      token,
 		ActorID:    cq.From.ID,
 		ChatID:     msg.Chat.ID,
@@ -132,6 +142,15 @@ func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *model
 			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.unavailable"), true)
 		}
 		return
+	}
+	if state.Status == "failed" || state.Status == "delivery_unknown" {
+		stageCtx, stageCancel := context.WithTimeout(ctx, 3*time.Second)
+		current, stageErr := h.vido.JobStage(stageCtx, state.JobID)
+		stageCancel()
+		if stageErr == nil && current.MessageKey != "" {
+			h.answerCB(ctx, b, cq.ID, i18n.T(lang, searchyDownloadErrorKey(current.MessageKey)), true)
+			return
+		}
 	}
 	text := i18n.T(lang, "download.queued")
 	if state.Status != "queued" {
@@ -155,24 +174,17 @@ func (h *Handlers) watchDownload(b *bot.Bot, jobID, chatID int64, threadID, orig
 			state, err := h.vido.JobStage(ctx, jobID)
 			if err != nil {
 				h.log.Warn("vido job stage unavailable", "job_id", jobID, "err", err)
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					continue
+				}
 			}
 			switch state.Status {
-			case "failed":
-				key := searchyDownloadErrorKey(state.MessageKey)
-				h.replyThread(ctx, b, chatID, threadID, i18n.T(h.langCached(user), key))
-				return
-			case "delivery_unknown":
-				_, err := b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
-					ChatID:    chatID,
-					MessageID: originMessageID,
-					ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{
-						Text: i18n.T(h.langCached(user), "download.retry_button"), CallbackData: retryCallbackPrefix + token,
-					}}}},
-				})
-				if err != nil {
-					h.log.Warn("set vido retry action failed", "job_id", jobID, "err", err)
-				}
+			case "failed", "delivery_unknown":
+				// A durable notification worker owns terminal UI so restart or a
+				// transient core error cannot lose the failure/retry control.
 				return
 			case "delivered":
 				return
@@ -192,10 +204,30 @@ func (h *Handlers) watchDownload(b *bot.Bot, jobID, chatID int64, threadID, orig
 }
 
 func searchyDownloadErrorKey(vidoKey string) string {
-	if vidoKey == "error.unsupported_platform" {
+	switch vidoKey {
+	case "error.unsupported_platform":
 		return "download.unsupported"
+	case "error.file_too_large":
+		return "download.too_large"
+	case "error.drm_protected":
+		return "download.drm"
+	case "error.auth_required":
+		return "download.auth_required"
+	case "error.rate_limited":
+		return "download.rate_limited"
+	case "error.download_timeout":
+		return "download.timeout"
+	case "error.content_not_found":
+		return "download.not_found"
+	case "error.audio_only":
+		return "download.audio_only"
+	case "audio.not_found":
+		return "download.audio_not_found"
+	case "audio.failed":
+		return "download.audio_failed"
+	default:
+		return "download.failed"
 	}
-	return "download.failed"
 }
 
 func stageChatAction(stage string) models.ChatAction {

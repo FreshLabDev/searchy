@@ -69,6 +69,10 @@ func ValidatePlan(plan DeliveryPlan, expectedJobID int64, cacheRoot string) erro
 	if err != nil {
 		return err
 	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve shared cache root: %w", err)
+	}
 	seen := make(map[string]struct{}, len(plan.Operations))
 	for _, op := range plan.Operations {
 		if _, ok := seen[op.OperationID]; ok || op.OperationID == "" {
@@ -145,7 +149,32 @@ func validateSource(source Source, cacheRoot string) error {
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("local file escaped shared cache")
 		}
-		info, err := os.Stat(abs)
+		// Reject every symlink component before following the path. Searchy mounts
+		// the cache read-only, so Vido cannot replace components after validation;
+		// the local Bot API then sees the same canonical cache path.
+		current := cacheRoot
+		for _, part := range strings.Split(rel, string(filepath.Separator)) {
+			if part == "" || part == "." {
+				continue
+			}
+			current = filepath.Join(current, part)
+			info, lerr := os.Lstat(current)
+			if lerr != nil {
+				return fmt.Errorf("local artifact is missing")
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("local artifact contains symlink")
+			}
+		}
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return fmt.Errorf("local artifact is missing")
+		}
+		resolvedRel, err := filepath.Rel(cacheRoot, resolved)
+		if err != nil || resolvedRel == ".." || strings.HasPrefix(resolvedRel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("local file escaped shared cache")
+		}
+		info, err := os.Lstat(resolved)
 		if err != nil || !info.Mode().IsRegular() {
 			return fmt.Errorf("local artifact is missing")
 		}

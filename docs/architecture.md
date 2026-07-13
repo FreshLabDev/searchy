@@ -132,3 +132,15 @@ Bot API mount it read-only at `/shared-media-cache`; Searchy passes local file
 URIs to the Bot API and ACKs each media/album/sidecar operation. The last lease
 release lets Vido delete the physical files, while bot-specific Telegram
 `file_id` records remain durable.
+
+Before a Telegram call, Searchy records the operation as `sending`. A confirmed
+ACK is monotonic and cannot later be replaced by a timeout or failure. If the
+process dies after Telegram may have accepted the media, lease recovery marks
+the delivery unknown and offers only the card owner an explicit retry warning
+about a possible duplicate. Failed downloads are delivered through a durable
+notification outbox using Vido's structured `user_message_key`, so a Searchy
+restart does not lose the specific error.
+
+The bridge pool is initialized without requiring core-postgres to be reachable
+at that exact startup instant. pgx reconnects lazily; health stays `degraded`
+while core is down and returns to `ok` without restarting Searchy.

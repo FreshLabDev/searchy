@@ -8,6 +8,19 @@ import (
 	"time"
 )
 
+func TestBridgeOpenRecoversAfterDatabaseStartup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	bridge, err := Open(ctx, "postgres://searchy:unused@127.0.0.1:1/core")
+	if err != nil {
+		t.Fatalf("Open must initialize a reconnecting pool: %v", err)
+	}
+	defer bridge.Close()
+	if !bridge.Ready() {
+		t.Fatal("reconnecting bridge pool is not ready")
+	}
+}
+
 func TestBridgeLeastPrivilegeLifecycle(t *testing.T) {
 	databaseURL := os.Getenv("SEARCHY_BRIDGE_TEST_DATABASE_URL")
 	if databaseURL == "" {
