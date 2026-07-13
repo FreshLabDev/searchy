@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -122,6 +123,10 @@ func main() {
 	opts := []bot.Option{
 		bot.WithDefaultHandler(handlers.Route),
 		bot.WithWorkers(cfg.Workers),
+		// go-telegram/bot sends an unterminated multipart body for parameterless
+		// calls. Telegram's cloud endpoint tolerates it, but the local Bot API
+		// returns an empty response. Validate the token with telegramGetMe below.
+		bot.WithSkipGetMe(),
 		bot.WithAllowedUpdates(bot.AllowedUpdates{"inline_query", "chosen_inline_result", "message", "callback_query"}),
 		bot.WithErrorsHandler(func(err error) {
 			logger.Warn("bot error", "err", err)
@@ -147,7 +152,7 @@ func main() {
 	// fail fast and loud rather than running on with an empty username (which would
 	// render "{bot}" prompts as a dangling "@" for the whole process life).
 	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	me, err := b.GetMe(startupCtx)
+	me, err := telegramGetMe(startupCtx, telegramClient, cfg.TelegramBotAPIBaseURL, cfg.BotToken)
 	if err != nil {
 		logger.Error("getMe (check BOT_TOKEN / connectivity)", "err", err)
 		cancel()
@@ -176,6 +181,39 @@ func main() {
 		"searxng", cfg.SearxngURL, "workers", cfg.Workers, "cache_ttl", cfg.CacheTTL.String())
 	b.Start(ctx) // blocks until ctx is cancelled (SIGINT/SIGTERM)
 	logger.Info("shutdown complete")
+}
+
+func telegramGetMe(ctx context.Context, client *http.Client, serverURL, token string) (*models.User, error) {
+	if serverURL == "" {
+		serverURL = "https://api.telegram.org"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(serverURL, "/")+"/bot"+token+"/getMe", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build getMe request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		// Do not return the URL: it contains the bot token.
+		return nil, fmt.Errorf("perform getMe request: %T", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("getMe returned HTTP %d", resp.StatusCode)
+	}
+	var envelope struct {
+		OK          bool        `json:"ok"`
+		Result      models.User `json:"result"`
+		Description string      `json:"description"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&envelope); err != nil {
+		return nil, fmt.Errorf("decode getMe response: %w", err)
+	}
+	if !envelope.OK {
+		return nil, fmt.Errorf("getMe rejected: %s", envelope.Description)
+	}
+	return &envelope.Result, nil
 }
 
 // registerCommands publishes a minimal command list: private chats see only

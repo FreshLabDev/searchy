@@ -46,7 +46,7 @@ Searchy keeps the MVP deliberately narrow:
 
 | Channel | Version | Meaning |
 |:--|:--|:--|
-| Latest | `v0.1.0-alpha.2` | Vido downloads with shared cache/Bot API, owner-bound video and audio delivery |
+| Latest | `v0.1.0-alpha.3` | Vido bridge alpha with local Bot API startup compatibility fix |
 
 Searchy is an early alpha. The core inline, DM, and group search flows are
 live-tested against Telegram and a self-hosted SearXNG. See
