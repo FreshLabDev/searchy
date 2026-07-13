@@ -99,7 +99,7 @@ func main() {
 		} else if bridge == nil {
 			logger.Warn("vido bridge disabled — CORE_DATABASE_URL is unset")
 		} else {
-			logger.Info("vido bridge connected")
+			logger.Info("vido bridge pool initialized")
 			defer bridge.Close()
 		}
 	}
@@ -168,6 +168,7 @@ func main() {
 	// the critical path so the handful of setMyCommands calls don't delay polling.
 	go registerCommands(ctx, b, logger)
 	go handlers.RunDeliveryWorker(ctx, b)
+	go handlers.RunNotificationWorker(ctx, b)
 
 	// Health endpoint for container orchestration.
 	healthSrv := startHealthServer(logger, cfg.VidoBridgeEnabled, bridge)

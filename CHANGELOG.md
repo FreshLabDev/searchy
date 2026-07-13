@@ -10,6 +10,33 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-alpha.5 - 2026-07-13
+
+### Fixed
+
+- Keep the Vido bridge reconnectable when core-postgres is unavailable during
+  Searchy startup, so Download buttons recover without restarting the bot.
+- Deliver Vido's exact terminal reason to Searchy users for unsupported links,
+  2 GB limits, DRM, authentication, source rate limits, timeouts, unavailable
+  media, video-only mismatches and audio extraction failures.
+- Record a durable `sending` boundary before every Telegram operation. A lost
+  ACK can no longer downgrade a delivered operation or trigger an automatic
+  duplicate after restart; uncertain delivery requires an explicit owner-bound
+  retry.
+- Renew long delivery leases, reject malformed plans durably, invalidate every
+  cached item in a failed album, and keep terminal notifications alive across
+  Searchy restarts.
+
+### Security
+
+- Resolve and reject symlinks inside the read-only shared cache, and keep source
+  URLs/tokens out of delivery failures and bridge logs.
+
+### Operations
+
+- Requires core migration `005_vido_searchy_bridge_reliability.sql` and Vido
+  `v2.3.5-alpha.2`.
+
 ## v0.1.0-alpha.4 - 2026-07-13
 
 ### Fixed

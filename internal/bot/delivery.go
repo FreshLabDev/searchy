@@ -11,6 +11,7 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
+	"searchy/internal/i18n"
 	vidobridge "searchy/internal/vido"
 )
 
@@ -31,6 +32,13 @@ func (h *Handlers) RunDeliveryWorker(ctx context.Context, b *bot.Bot) {
 		delivery, err := h.vido.ClaimDelivery(ctx, workerID, 900)
 		if err != nil {
 			h.log.Warn("claim vido delivery failed", "err", err)
+			if delivery != nil {
+				rejectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if rejectErr := h.vido.RejectDelivery(rejectCtx, workerID, delivery.JobID, "invalid_delivery_plan"); rejectErr != nil {
+					h.log.Warn("reject undecodable vido plan failed", "job_id", delivery.JobID, "err", rejectErr)
+				}
+				cancel()
+			}
 		} else if delivery != nil {
 			h.deliverPlan(ctx, b, workerID, delivery)
 			continue
@@ -43,14 +51,90 @@ func (h *Handlers) RunDeliveryWorker(ctx context.Context, b *bot.Bot) {
 	}
 }
 
+// RunNotificationWorker durably delivers terminal processing status after a
+// Searchy restart. Chat actions remain best-effort; failures and explicit
+// delivery-unknown retry controls do not live only in process memory.
+func (h *Handlers) RunNotificationWorker(ctx context.Context, b *bot.Bot) {
+	if h.vido == nil || !h.vido.Ready() {
+		return
+	}
+	host, _ := os.Hostname()
+	workerID := fmt.Sprintf("%s:%d:notify", host, os.Getpid())
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		n, err := h.vido.ClaimNotification(ctx, workerID, 120)
+		if err != nil {
+			h.log.Warn("claim vido notification failed", "err", err)
+		} else if n != nil {
+			if err := h.deliverNotification(ctx, b, n); err != nil {
+				h.log.Warn("deliver vido notification failed", "job_id", n.JobID, "status", n.Status, "err", err)
+			} else if err := h.ackNotificationWithRetry(ctx, workerID, n); err != nil {
+				h.log.Warn("ack vido notification failed", "job_id", n.JobID, "err", err)
+			}
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (h *Handlers) ackNotificationWithRetry(ctx context.Context, workerID string, n *vidobridge.Notification) error {
+	var last error
+	for attempt := 0; attempt < 3; attempt++ {
+		ackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		last = h.vido.AckNotification(ackCtx, workerID, n.JobID, n.Status)
+		cancel()
+		if last == nil {
+			return nil
+		}
+		if attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+	return last
+}
+
+func (h *Handlers) deliverNotification(ctx context.Context, b *bot.Bot, n *vidobridge.Notification) error {
+	lang := i18n.Resolve(n.Language)
+	if n.Status == "delivery_unknown" {
+		if n.OriginMessageID == 0 || n.RetryToken == "" {
+			return errors.New("delivery_unknown notification is missing retry context")
+		}
+		_, err := b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
+			ChatID: n.TargetChatID, MessageID: n.OriginMessageID,
+			ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{
+				Text: i18n.T(lang, "download.retry_button"), CallbackData: retryCallbackPrefix + n.RetryToken,
+			}}}},
+		})
+		return err
+	}
+	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: n.TargetChatID, MessageThreadID: n.TargetThreadID,
+		Text: i18n.T(lang, searchyDownloadErrorKey(n.MessageKey)),
+	})
+	return err
+}
+
 func (h *Handlers) deliverPlan(ctx context.Context, b *bot.Bot, workerID string, delivery *vidobridge.Delivery) {
 	if err := vidobridge.ValidatePlan(delivery.Plan, delivery.JobID, h.sharedCacheRoot); err != nil {
 		h.log.Warn("rejected vido delivery plan", "job_id", delivery.JobID, "err", err)
-		if len(delivery.Plan.Operations) > 0 {
-			_ = h.vido.FailOperation(ctx, workerID, delivery.JobID, delivery.Plan.Operations[0], "invalid_delivery_plan", false)
+		if rejectErr := h.vido.RejectDelivery(ctx, workerID, delivery.JobID, "invalid_delivery_plan"); rejectErr != nil {
+			h.log.Warn("record rejected vido plan failed", "job_id", delivery.JobID, "err", rejectErr)
 		}
 		return
 	}
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go h.renewDeliveryLease(heartbeatCtx, workerID, delivery.JobID)
+
 	delivered := make(map[string]struct{}, len(delivery.DeliveredOps))
 	for _, id := range delivery.DeliveredOps {
 		delivered[id] = struct{}{}
@@ -60,10 +144,16 @@ func (h *Handlers) deliverPlan(ctx context.Context, b *bot.Bot, workerID string,
 		if _, ok := delivered[op.OperationID]; ok {
 			continue
 		}
+		if err := h.vido.BeginOperation(ctx, workerID, delivery.JobID, op); err != nil {
+			h.log.Warn("begin vido Telegram operation failed", "job_id", delivery.JobID, "operation", op.OperationID, "err", err)
+			return
+		}
 		messages, err := h.sendOperation(ctx, b, delivery, op)
 		if err != nil {
-			if source := invalidFileIDSource(op, err); source != "" {
-				_ = h.vido.InvalidateFileRef(ctx, source)
+			if sources := invalidFileIDSources(op, err); len(sources) > 0 {
+				for _, source := range sources {
+					_ = h.vido.InvalidateFileRef(ctx, source)
+				}
 				_ = h.vido.FailOperation(ctx, workerID, delivery.JobID, op, "invalid_file_id", false)
 				return
 			}
@@ -80,22 +170,57 @@ func (h *Handlers) deliverPlan(ctx context.Context, b *bot.Bot, workerID string,
 		if len(messages) > 0 {
 			messageID = messages[0].ID
 		}
-		for _, button := range op.Buttons {
-			if button.Type == "audio" && messageID != 0 {
-				if err := h.vido.BindIntentMessage(ctx, button.Token, delivery.OwnerUserID, delivery.TargetChatID, messageID); err != nil {
-					h.log.Warn("bind vido audio action failed", "job_id", delivery.JobID, "err", err)
-				}
-			}
-		}
-		if err := h.vido.AckOperation(ctx, workerID, delivery.JobID, op, messageID, refs); err != nil {
+		if err := h.ackOperationWithRetry(ctx, workerID, delivery.JobID, op, messageID, refs); err != nil {
 			h.log.Warn("ack vido operation failed", "job_id", delivery.JobID, "operation", op.OperationID, "err", err)
-			_ = h.vido.FailOperation(ctx, workerID, delivery.JobID, op, "ack_unknown", true)
+			// begin_searchy_operation durably recorded "sending" before Telegram.
+			// If ACK did not commit, lease recovery turns it into delivery_unknown;
+			// if ACK did commit but its response was lost, the next claim observes
+			// delivered and finishes without sending the media again.
 			return
 		}
 	}
 	if err := h.vido.FinishDelivery(ctx, workerID, delivery.JobID); err != nil {
 		h.log.Warn("finish vido delivery failed", "job_id", delivery.JobID, "err", err)
 	}
+}
+
+func (h *Handlers) renewDeliveryLease(ctx context.Context, workerID string, jobID int64) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			renewCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := h.vido.RenewDelivery(renewCtx, workerID, jobID, 900)
+			cancel()
+			if err != nil {
+				h.log.Warn("renew vido delivery lease failed", "job_id", jobID, "err", err)
+				return
+			}
+		}
+	}
+}
+
+func (h *Handlers) ackOperationWithRetry(ctx context.Context, workerID string, jobID int64, op vidobridge.Operation, messageID int, refs []vidobridge.FileRef) error {
+	var last error
+	for attempt := 0; attempt < 3; attempt++ {
+		ackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		last = h.vido.AckOperation(ackCtx, workerID, jobID, op, messageID, refs)
+		cancel()
+		if last == nil {
+			return nil
+		}
+		if attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * time.Second):
+			}
+		}
+	}
+	return last
 }
 
 func (h *Handlers) sendOperation(ctx context.Context, b *bot.Bot, delivery *vidobridge.Delivery, op vidobridge.Operation) ([]*models.Message, error) {
@@ -257,23 +382,24 @@ func messageFileRef(source vidobridge.Source, kind string, message *models.Messa
 	return ref, ref.FileID != ""
 }
 
-func invalidFileIDSource(op vidobridge.Operation, err error) string {
+func invalidFileIDSources(op vidobridge.Operation, err error) []string {
 	if err == nil || !errors.Is(err, bot.ErrorBadRequest) {
-		return ""
+		return nil
 	}
 	text := strings.ToLower(err.Error())
 	if !strings.Contains(text, "file") || (!strings.Contains(text, "identifier") && !strings.Contains(text, "file_id")) {
-		return ""
+		return nil
 	}
+	values := make([]string, 0, len(op.Media)+1)
 	if op.Source != nil && op.Source.Kind == "telegram_file_id" {
-		return op.Source.Value
+		values = append(values, op.Source.Value)
 	}
 	for _, item := range op.Media {
 		if item.Source.Kind == "telegram_file_id" {
-			return item.Source.Value
+			values = append(values, item.Source.Value)
 		}
 	}
-	return ""
+	return values
 }
 
 func telegramDefiniteFailure(err error) bool {

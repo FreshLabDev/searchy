@@ -20,10 +20,22 @@ func TestParseDownloadCallbacks(t *testing.T) {
 }
 
 func TestSearchyDownloadErrorKey(t *testing.T) {
-	if got := searchyDownloadErrorKey("error.unsupported_platform"); got != "download.unsupported" {
-		t.Fatalf("unsupported mapped to %q", got)
+	tests := map[string]string{
+		"error.unsupported_platform": "download.unsupported",
+		"error.file_too_large":       "download.too_large",
+		"error.drm_protected":        "download.drm",
+		"error.auth_required":        "download.auth_required",
+		"error.rate_limited":         "download.rate_limited",
+		"error.download_timeout":     "download.timeout",
+		"error.content_not_found":    "download.not_found",
+		"error.audio_only":           "download.audio_only",
+		"audio.not_found":            "download.audio_not_found",
+		"audio.failed":               "download.audio_failed",
+		"error.other":                "download.failed",
 	}
-	if got := searchyDownloadErrorKey("error.auth_required"); got != "download.failed" {
-		t.Fatalf("generic failure mapped to %q", got)
+	for input, want := range tests {
+		if got := searchyDownloadErrorKey(input); got != want {
+			t.Fatalf("%s mapped to %q, want %q", input, got, want)
+		}
 	}
 }

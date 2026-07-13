@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FreshLabDev/searchy/releases"><img src="https://img.shields.io/github/v/release/FreshLabDev/searchy?include_prereleases&sort=semver&style=for-the-badge&label=latest&labelColor=0f172a&color=4c8c4a" alt="latest version"></a>
-  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--alpha.2-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
+  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--alpha.5-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/FreshLabDev/searchy?style=for-the-badge&logo=go&logoColor=white&label=go&labelColor=0f172a&color=00ADD8" alt="go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-334155?style=for-the-badge&labelColor=0f172a" alt="license"></a>
 </p>
@@ -46,7 +46,7 @@ Searchy keeps the MVP deliberately narrow:
 
 | Channel | Version | Meaning |
 |:--|:--|:--|
-| Latest | `v0.1.0-alpha.4` | Vido bridge alpha with strict local Bot API transport fixes |
+| Latest | `v0.1.0-alpha.5` | Durable Vido errors, recovery and duplicate prevention |
 
 Searchy is an early alpha. The core inline, DM, and group search flows are
 live-tested against Telegram and a self-hosted SearXNG. See

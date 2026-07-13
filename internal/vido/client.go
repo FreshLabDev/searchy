@@ -39,16 +39,14 @@ func Open(ctx context.Context, databaseURL string) (*Bridge, error) {
 	cfg.MaxConns = 4
 	cfg.MinConns = 0
 	cfg.MaxConnIdleTime = 5 * time.Minute
+	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect vido bridge: %w", err)
 	}
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping vido bridge: %w", err)
-	}
+	// Keep the pool alive when core is temporarily unavailable at startup.
+	// pgx reconnects lazily, so buttons and workers recover without restarting
+	// Searchy; /healthz remains degraded until Healthy succeeds.
 	return &Bridge{pool: pool}, nil
 }
 
@@ -163,6 +161,21 @@ func (b *Bridge) Enqueue(ctx context.Context, a EnqueueArgs) (JobState, error) {
 	return state, nil
 }
 
+func (b *Bridge) EnqueueRetry(ctx context.Context, a EnqueueArgs) (JobState, error) {
+	if !b.Ready() {
+		return JobState{}, errors.New("vido bridge unavailable")
+	}
+	var state JobState
+	err := b.pool.QueryRow(ctx,
+		`SELECT job_id, job_status, activity_stage FROM vido.enqueue_searchy_retry_job($1,$2,$3,$4,$5,$6)`,
+		tokenHash(a.Token), a.ActorID, a.ChatID, nullableInt(a.ThreadID), a.MessageID, a.RequestKey,
+	).Scan(&state.JobID, &state.Status, &state.ActivityStage)
+	if err != nil {
+		return JobState{}, classifyIntentError(err)
+	}
+	return state, nil
+}
+
 func (b *Bridge) JobStage(ctx context.Context, jobID int64) (JobState, error) {
 	if !b.Ready() {
 		return JobState{}, errors.New("vido bridge unavailable")
@@ -212,9 +225,109 @@ func (b *Bridge) ClaimDelivery(ctx context.Context, workerID string, leaseSecond
 		d.OriginMessageID = *originMessageID
 	}
 	if err := json.Unmarshal(raw, &d.Plan); err != nil {
-		return nil, fmt.Errorf("decode vido delivery plan: %w", err)
+		return &d, fmt.Errorf("decode vido delivery plan: %w", err)
 	}
 	return &d, nil
+}
+
+func (b *Bridge) BeginOperation(ctx context.Context, workerID string, jobID int64, op Operation) error {
+	var ok bool
+	err := b.pool.QueryRow(ctx,
+		`SELECT vido.begin_searchy_operation($1,$2,$3,$4)`,
+		workerID, jobID, op.OperationID, op.Type,
+	).Scan(&ok)
+	if err != nil {
+		return fmt.Errorf("begin vido operation: %w", err)
+	}
+	if !ok {
+		return errors.New("vido delivery lease lost")
+	}
+	return nil
+}
+
+func (b *Bridge) RenewDelivery(ctx context.Context, workerID string, jobID int64, leaseSeconds int) error {
+	var ok bool
+	err := b.pool.QueryRow(ctx,
+		`SELECT vido.renew_searchy_delivery($1,$2,$3)`, workerID, jobID, leaseSeconds,
+	).Scan(&ok)
+	if err != nil {
+		return fmt.Errorf("renew vido delivery: %w", err)
+	}
+	if !ok {
+		return errors.New("vido delivery lease lost")
+	}
+	return nil
+}
+
+func (b *Bridge) RejectDelivery(ctx context.Context, workerID string, jobID int64, reason string) error {
+	var ok bool
+	err := b.pool.QueryRow(ctx,
+		`SELECT vido.reject_searchy_delivery($1,$2,$3)`, workerID, jobID, reason,
+	).Scan(&ok)
+	if err != nil {
+		return fmt.Errorf("reject vido delivery: %w", err)
+	}
+	if !ok {
+		return errors.New("vido delivery lease lost")
+	}
+	return nil
+}
+
+type Notification struct {
+	JobID           int64
+	OwnerUserID     int64
+	TargetChatID    int64
+	TargetThreadID  int
+	OriginMessageID int
+	Status          string
+	MessageKey      string
+	Language        string
+	RetryToken      string
+}
+
+func (b *Bridge) ClaimNotification(ctx context.Context, workerID string, leaseSeconds int) (*Notification, error) {
+	if !b.Ready() {
+		return nil, nil
+	}
+	var n Notification
+	var threadID, originMessageID *int
+	var retryToken *string
+	err := b.pool.QueryRow(ctx,
+		`SELECT job_id, owner_user_id, target_chat_id, target_thread_id,
+		        origin_message_id, job_status, user_message_key, language, retry_token
+		 FROM vido.claim_searchy_notification($1,$2)`, workerID, leaseSeconds,
+	).Scan(&n.JobID, &n.OwnerUserID, &n.TargetChatID, &threadID, &originMessageID,
+		&n.Status, &n.MessageKey, &n.Language, &retryToken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim vido notification: %w", err)
+	}
+	if threadID != nil {
+		n.TargetThreadID = *threadID
+	}
+	if originMessageID != nil {
+		n.OriginMessageID = *originMessageID
+	}
+	if retryToken != nil {
+		n.RetryToken = *retryToken
+	}
+	return &n, nil
+}
+
+func (b *Bridge) AckNotification(ctx context.Context, workerID string, jobID int64, status string) error {
+	var ok bool
+	err := b.pool.QueryRow(ctx,
+		`SELECT vido.ack_searchy_notification($1,$2,$3)`, workerID, jobID, status,
+	).Scan(&ok)
+	if err != nil {
+		return fmt.Errorf("ack vido notification: %w", err)
+	}
+	if !ok {
+		return errors.New("vido notification lease lost")
+	}
+	return nil
 }
 
 type FileRef struct {
@@ -231,10 +344,22 @@ func (b *Bridge) AckOperation(ctx context.Context, workerID string, jobID int64,
 	if err != nil {
 		return err
 	}
+	audioHashes := make([]string, 0, len(op.Buttons))
+	for _, button := range op.Buttons {
+		if button.Type != "audio" || button.Token == "" {
+			continue
+		}
+		digest := sha256.Sum256([]byte(button.Token))
+		audioHashes = append(audioHashes, fmt.Sprintf("%x", digest[:]))
+	}
+	resultJSON, err := json.Marshal(map[string]any{"audio_token_hashes": audioHashes})
+	if err != nil {
+		return err
+	}
 	var ok bool
 	err = b.pool.QueryRow(ctx,
-		`SELECT vido.ack_searchy_operation($1,$2,$3,$4,$5,'{}'::jsonb,$6::jsonb)`,
-		workerID, jobID, op.OperationID, op.Type, messageID, refJSON,
+		`SELECT vido.ack_searchy_operation($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)`,
+		workerID, jobID, op.OperationID, op.Type, messageID, resultJSON, refJSON,
 	).Scan(&ok)
 	if err != nil {
 		return fmt.Errorf("ack vido operation: %w", err)

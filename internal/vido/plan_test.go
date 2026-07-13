@@ -40,3 +40,27 @@ func TestDeliveryPlanRejectsCacheEscape(t *testing.T) {
 		t.Fatal("cache-root escape was accepted")
 	}
 }
+
+func TestDeliveryPlanRejectsSymlinkInsideCache(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.mp4")
+	if err := os.WriteFile(outside, []byte("not-media"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "media.mp4")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	plan := DeliveryPlan{
+		Version: 1,
+		JobID:   8,
+		Operations: []Operation{{
+			OperationID: "media-1",
+			Type:        "video",
+			Source:      &Source{Kind: "local_file_uri", Value: "file://" + link},
+		}},
+	}
+	if err := ValidatePlan(plan, 8, root); err == nil {
+		t.Fatal("symlink inside cache was accepted")
+	}
+}
