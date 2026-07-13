@@ -10,6 +10,36 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-alpha.2 - 2026-07-13
+
+### Added
+
+- Owner-bound Vido downloads for every video result in DM and group cards;
+  selected media is sent as a separate new Searchy message in the original
+  chat/topic using the user's personal Vido settings.
+- Personal inline Download deep links to Vido DM, with cover-only inline cards
+  and no attempt to infer the selected chat.
+- A least-privilege core-postgres bridge client and strict `DeliveryPlan v1`
+  executor for video, photo, audio, document, album and sidecar operations.
+- Owner-bound audio follow-up jobs, Vido download-settings menu link, localized
+  bridge/error strings in all 16 languages, and explicit possible-duplicate
+  retry after `delivery_unknown`.
+- Optional shared local Bot API support and `/healthz` bridge component state.
+
+### Changed
+
+- Inline answers are personal (`is_personal=true`).
+- Telegram 429 delivery waits exactly for `retry_after`; confirmed operation
+  ACKs survive restarts and are never resent automatically.
+
+### Security
+
+- Searchy has no direct bridge-table access and receives neither source URLs nor
+  Vido settings after job creation.
+- Delivery plans reject unknown operations, non-HTTPS URL buttons, oversized
+  captions/files, album-limit violations and local paths outside the shared
+  cache root.
+
 ## v0.1.0-alpha.1 - 2026-07-04
 
 First `v0.1.0` pre-release. A minimal Telegram bot that searches images and

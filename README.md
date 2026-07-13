@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FreshLabDev/searchy/releases"><img src="https://img.shields.io/github/v/release/FreshLabDev/searchy?include_prereleases&sort=semver&style=for-the-badge&label=latest&labelColor=0f172a&color=4c8c4a" alt="latest version"></a>
-  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--alpha.1-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
+  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--alpha.2-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/FreshLabDev/searchy?style=for-the-badge&logo=go&logoColor=white&label=go&labelColor=0f172a&color=00ADD8" alt="go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-334155?style=for-the-badge&labelColor=0f172a" alt="license"></a>
 </p>
@@ -46,7 +46,7 @@ Searchy keeps the MVP deliberately narrow:
 
 | Channel | Version | Meaning |
 |:--|:--|:--|
-| Latest | `v0.1.0-alpha.1` | First `v0.1.0` pre-release: SearXNG search, inline + grid UX, saved language, private analytics |
+| Latest | `v0.1.0-alpha.2` | Vido downloads with shared cache/Bot API, owner-bound video and audio delivery |
 
 Searchy is an early alpha. The core inline, DM, and group search flows are
 live-tested against Telegram and a self-hosted SearXNG. See
@@ -63,7 +63,7 @@ live-tested against Telegram and a self-hosted SearXNG. See
 | **DM search** | Any text message runs a search and returns a single numbered result grid |
 | **Group search** | `/search <query>` returns the same grid; anyone can page or open an item |
 | **Category prefixes** | `i:` images only, `v:` videos only, otherwise both |
-| **Video cards** | Cover + title with an "Open on <platform>" link button (Download handoff is roadmap) |
+| **Video cards** | Cover + title with Open and owner-bound Download buttons powered by Vido |
 | **Menu** | `/start` opens an inline panel: language, stats, help, about |
 | **16 languages** | Full i18n; the chosen language is remembered across the sibling bots via **core** |
 | **Private analytics** | Optional `/stats` panel (personal + global) built from counts only |
@@ -120,6 +120,13 @@ at an instance with the JSON API enabled and run `make run`.
 ---
 
 ## How It Works
+
+Search remains stateless and private. For a selected video, Searchy creates an
+owner-bound intent in the shared core database; Vido applies the user's personal
+download settings and builds a safe DeliveryPlan. Searchy sends the ready media
+as a separate message with its own bot token through the shared local Telegram
+Bot API. Inline download buttons use a Vido DM deep link because Telegram does
+not expose the chosen chat id to another bot.
 
 Searchy is one Go service that long-polls Telegram and calls a self-hosted
 SearXNG over HTTP.
@@ -181,7 +188,10 @@ only `BOT_TOKEN` set.
 | `DATABASE_URL` | no | - | Postgres for private search analytics; empty disables `/stats` |
 | `CORE_DATABASE_URL` | no | - | Shared cross-bot **core** Postgres (identity, presence, language); empty falls back to the Telegram hint |
 | `POSTGRES_PASSWORD` | compose | - | Builds `DATABASE_URL` for the bundled dev Postgres |
-| `VIDO_BOT_USERNAME` | no | - | `@username` (no `@`) of the `@vido` download bot, for the future handoff |
+| `VIDO_BOT_USERNAME` | with bridge | - | `@username` (no `@`) of the Vido bot |
+| `VIDO_BRIDGE_ENABLED` | no | `false` | Enable owner-bound Vido intents and the Searchy delivery worker |
+| `TELEGRAM_BOT_API_BASE_URL` | no | cloud API | Shared local Bot API base URL |
+| `SHARED_MEDIA_CACHE_DIR` | no | `/shared-media-cache` | Read-only shared artifact root |
 
 ---
 
