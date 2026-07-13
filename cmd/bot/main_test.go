@@ -50,3 +50,27 @@ func TestTelegramGetMeErrorDoesNotExposeToken(t *testing.T) {
 		t.Fatalf("unexpected safe error: %q", got)
 	}
 }
+
+func TestTelegramDeleteWebhookUsesParameterlessGET(t *testing.T) {
+	t.Parallel()
+
+	const token = "123456:test-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/bot"+token+"/deleteWebhook" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("drop_pending_updates"); got != "false" {
+			t.Errorf("drop_pending_updates = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true,"result":true}`)
+	}))
+	defer server.Close()
+
+	if err := telegramDeleteWebhook(context.Background(), server.Client(), server.URL, token); err != nil {
+		t.Fatal(err)
+	}
+}

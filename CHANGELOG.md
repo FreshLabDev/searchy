@@ -10,6 +10,15 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-alpha.4 - 2026-07-13
+
+### Fixed
+
+- Omit `reply_markup` entirely when a DeliveryPlan operation has no buttons;
+  this fixes standalone audio delivery on the strict local Bot API.
+- Delete the webhook with a parameterless GET, removing the local Bot API's
+  empty-multipart startup warning without dropping pending updates.
+
 ## v0.1.0-alpha.3 - 2026-07-13
 
 ### Fixed

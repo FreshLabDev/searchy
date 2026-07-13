@@ -160,7 +160,7 @@ func main() {
 	}
 	handlers.SetBotUsername(me.Username)
 	logger.Info("authorized", "username", me.Username, "id", me.ID)
-	if _, err := b.DeleteWebhook(startupCtx, &bot.DeleteWebhookParams{DropPendingUpdates: false}); err != nil {
+	if err := telegramDeleteWebhook(startupCtx, telegramClient, cfg.TelegramBotAPIBaseURL, cfg.BotToken); err != nil {
 		logger.Warn("deleteWebhook", "err", err)
 	}
 	cancel()
@@ -214,6 +214,38 @@ func telegramGetMe(ctx context.Context, client *http.Client, serverURL, token st
 		return nil, fmt.Errorf("getMe rejected: %s", envelope.Description)
 	}
 	return &envelope.Result, nil
+}
+
+func telegramDeleteWebhook(ctx context.Context, client *http.Client, serverURL, token string) error {
+	if serverURL == "" {
+		serverURL = "https://api.telegram.org"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(serverURL, "/")+"/bot"+token+"/deleteWebhook?drop_pending_updates=false", nil)
+	if err != nil {
+		return fmt.Errorf("build deleteWebhook request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("perform deleteWebhook request: %T", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("deleteWebhook returned HTTP %d", resp.StatusCode)
+	}
+	var envelope struct {
+		OK          bool   `json:"ok"`
+		Result      bool   `json:"result"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&envelope); err != nil {
+		return fmt.Errorf("decode deleteWebhook response: %w", err)
+	}
+	if !envelope.OK || !envelope.Result {
+		return fmt.Errorf("deleteWebhook rejected: %s", envelope.Description)
+	}
+	return nil
 }
 
 // registerCommands publishes a minimal command list: private chats see only
