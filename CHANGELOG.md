@@ -10,6 +10,21 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-beta.1 - 2026-07-13
+
+### Fixed
+
+- Keep one Searchy process alive while the shared local Telegram Bot API warms
+  up, retrying transient `getMe` failures for up to two minutes while still
+  failing immediately for permanent configuration or token errors.
+
+### Operations
+
+- Extend the container health start period beyond the bounded Bot API warm-up
+  window so health-gated rollouts do not fail while startup is still retrying.
+- GitHub Release titles now match their version tags exactly without a project
+  name prefix.
+
 ## v0.1.0-alpha.5 - 2026-07-13
 
 ### Fixed

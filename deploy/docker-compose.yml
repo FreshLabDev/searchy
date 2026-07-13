@@ -23,7 +23,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # Covers the two-minute Telegram Bot API warm-up retry window.
+      start_period: 2m30s
 
   searxng:
     # STRONGLY pin a dated tag in .env (SEARXNG_TAG=2026.6.x-...). SearXNG ships

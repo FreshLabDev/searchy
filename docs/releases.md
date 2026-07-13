@@ -46,7 +46,7 @@ Development happens on `dev`; releases are published from `main`
 Use this shape for release notes:
 
 ```text
-Searchy v0.1.0-alpha.1
+v0.1.0-alpha.1
 
 Summary:
 - Short release purpose.
@@ -81,7 +81,7 @@ git push origin main
 git push origin v0.1.0-alpha.1
 gh release create v0.1.0-alpha.1 \
   --prerelease \
-  --title "Searchy v0.1.0-alpha.1" \
+  --title "v0.1.0-alpha.1" \
   --notes-file /tmp/searchy-release-notes.md
 ```
 
@@ -92,7 +92,7 @@ git tag -a v0.1.0 -m "v0.1.0"
 git push origin main
 git push origin v0.1.0
 gh release create v0.1.0 \
-  --title "Searchy v0.1.0" \
+  --title "v0.1.0" \
   --notes-file /tmp/searchy-release-notes.md
 ```
 
@@ -101,3 +101,6 @@ which builds a version-stamped image, pushes it to GHCR, and publishes a GitHub
 Release from the matching changelog section (pre-release tags are marked as
 pre-releases). Do not publish a release before the release notes, tag, and
 verification status all match.
+
+The visible GitHub Release title must equal the tag exactly. Do not prefix it
+with the project name or append descriptive text.
