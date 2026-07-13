@@ -14,7 +14,7 @@ import (
 //     link and a Download button in the keyboard. We deliberately send the cover
 //     as a photo rather than a bare link/embed, so the chat shows a clean card
 //     (cover + title) with the link tucked into a button (vido style).
-func buildInlineResults(results []search.MediaResult, lang string) []models.InlineQueryResult {
+func buildInlineResults(results []search.MediaResult, lang string, downloadURLs map[string]string) []models.InlineQueryResult {
 	out := make([]models.InlineQueryResult, 0, len(results))
 	for _, r := range results {
 		switch r.Category {
@@ -37,7 +37,7 @@ func buildInlineResults(results []search.MediaResult, lang string) []models.Inli
 				Description:  metaLine(r),
 				Caption:      videoCaption(r),
 				ParseMode:    models.ParseModeHTML,
-				ReplyMarkup:  videoButtons(r, lang),
+				ReplyMarkup:  videoButtons(r, lang, downloadButton{URL: downloadURLs[r.ID]}),
 			})
 		}
 	}
@@ -45,18 +45,24 @@ func buildInlineResults(results []search.MediaResult, lang string) []models.Inli
 }
 
 // videoButtons builds the video card keyboard: a "🔗 Open on <platform>" link
-// button (vido style) and a "⬇️ Download" button. The Download button is a
-// placeholder (callback "dl") until the @vido handoff is wired — see internal/vido.
-func videoButtons(r search.MediaResult, lang string) *models.InlineKeyboardMarkup {
+// button (vido style) and an owner-bound Vido download action.
+type downloadButton struct {
+	URL          string
+	CallbackData string
+}
+
+func videoButtons(r search.MediaResult, lang string, download downloadButton) *models.InlineKeyboardMarkup {
 	rows := make([][]models.InlineKeyboardButton, 0, 2)
 	if r.PageURL != "" {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: openLabel(r.PageURL, lang), URL: r.PageURL},
 		})
 	}
-	rows = append(rows, []models.InlineKeyboardButton{
-		{Text: i18n.T(lang, "btn.download"), CallbackData: "dl"},
-	})
+	if download.URL != "" || download.CallbackData != "" {
+		rows = append(rows, []models.InlineKeyboardButton{
+			{Text: i18n.T(lang, "btn.download"), URL: download.URL, CallbackData: download.CallbackData},
+		})
+	}
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 

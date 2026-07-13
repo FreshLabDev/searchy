@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "job_id": 123,
+  "activity_stage": "uploading_video",
+  "operations": [
+    {
+      "operation_id": "media-1",
+      "type": "video",
+      "source": {
+        "kind": "telegram_file_id",
+        "value": "BAACAgQAAxkBAAIBfixture"
+      },
+      "caption_html": "<b>Fixture</b>",
+      "filename": "fixture.mp4",
+      "supports_streaming": true,
+      "disable_content_type_detection": false,
+      "buttons": [
+        {
+          "type": "audio",
+          "token": "0123456789abcdefghijklmnopqrstuv",
+          "text": "🎧 Audio"
+        }
+      ]
+    }
+  ]
+}

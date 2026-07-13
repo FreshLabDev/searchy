@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 module searchy
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/go-telegram/bot v1.21.0

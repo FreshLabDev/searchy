@@ -35,8 +35,8 @@ both are optional — the bot runs fine with neither.
   (identity, presence, language) keyed on the global Telegram id.
 - `internal/i18n`: user-facing strings (16 languages) with `{placeholder}`
   interpolation and English fallback.
-- `internal/vido`: the seam for the future `@vido` download handoff (not wired in
-  v1).
+- `internal/vido`: least-privilege core-postgres bridge client plus strict
+  `DeliveryPlan v1` validator.
 - `internal/buildinfo`: build-time version metadata stamped at link time.
 
 ## Data Flow
@@ -113,3 +113,22 @@ for analytics and skip core entirely.
   grid sessions (which hold already-normalized media URLs, not what was typed).
 - Stats are served from a short-lived snapshot cache and refreshed in the
   background, so toggling the personal/global tabs costs no extra queries.
+
+## Vido bridge
+
+Video cards in DM/group search receive an owner-bound `vd:` callback. Searchy
+stores only a SHA-256 token through core migration 004, binds it to the sent
+card, and asks Vido's standalone worker to process the source with the user's
+personal Vido settings. Searchy receives no source URL or settings back: it
+claims a versioned DeliveryPlan, validates its operation/path whitelist, and
+sends a new message in the original chat/topic with its own token.
+
+Inline cards stay cover-only and personal. Their Download button is a Vido
+`/start ia_...` deep link because Telegram does not expose the chosen chat id to
+Vido. The Vido flow uses chat actions without a visible starting message.
+
+Vido alone writes the temporary shared cache. Searchy and the independent local
+Bot API mount it read-only at `/shared-media-cache`; Searchy passes local file
+URIs to the Bot API and ACKs each media/album/sidecar operation. The last lease
+release lets Vido delete the physical files, while bot-specific Telegram
+`file_id` records remain durable.

@@ -70,11 +70,11 @@ func curMark(active bool) string {
 }
 
 // homePanel — the /start landing panel.
-func homePanel(lang, botUsername string, owner int64) (string, *models.InlineKeyboardMarkup) {
+func homePanel(lang, botUsername, vidoBotUsername string, owner int64) (string, *models.InlineKeyboardMarkup) {
 	text := i18n.T(lang, "home.title") + "\n\n" +
 		i18n.T(lang, "home.tagline") + "\n\n" +
 		i18n.T(lang, "home.hint", "bot", botUsername)
-	kb := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+	rows := [][]models.InlineKeyboardButton{
 		{
 			{Text: i18n.T(lang, "btn.language"), CallbackData: cb(owner, "language")},
 			{Text: i18n.T(lang, "btn.stats"), CallbackData: cb(owner, "statsp")},
@@ -83,8 +83,15 @@ func homePanel(lang, botUsername string, owner int64) (string, *models.InlineKey
 			{Text: i18n.T(lang, "btn.help"), CallbackData: cb(owner, "help")},
 			{Text: i18n.T(lang, "btn.about"), CallbackData: cb(owner, "about")},
 		},
-		{{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")}},
-	}}
+	}
+	if vidoBotUsername != "" {
+		rows = append(rows, []models.InlineKeyboardButton{{
+			Text: i18n.T(lang, "btn.video_settings"),
+			URL:  "https://t.me/" + vidoBotUsername + "?start=settings",
+		}})
+	}
+	rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")}})
+	kb := &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 	return text, kb
 }
 
