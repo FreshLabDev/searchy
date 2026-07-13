@@ -225,17 +225,35 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 
 	switch r.Category {
 	case search.CatVideo:
-		kb := videoButtons(r, lang)
+		token, mintErr := h.mintChatDownload(ctx, user, r, chatID)
+		download := downloadButton{}
+		if mintErr == nil {
+			download.CallbackData = videoCallbackPrefix + token
+		} else if h.vido != nil {
+			h.log.Warn("vido card intent unavailable", "err", mintErr)
+		}
+		kb := videoButtons(r, lang, download)
+		var sent *models.Message
 		if data, ok := h.downloadImage(dctx, r.ThumbURL); ok {
-			_, err := b.SendPhoto(ctx, &bot.SendPhotoParams{
+			var err error
+			sent, err = b.SendPhoto(ctx, &bot.SendPhotoParams{
 				ChatID: chatID, MessageThreadID: threadID, Photo: &models.InputFileUpload{Filename: "cover.jpg", Data: bytes.NewReader(data)},
 				Caption: videoCaption(r), ParseMode: models.ParseModeHTML, ReplyMarkup: kb,
 			})
 			if err != nil {
 				h.log.Warn("sendPhoto (pick video) failed", "err", err)
 			}
-		} else if _, err := b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, MessageThreadID: threadID, Text: videoCaption(r), ParseMode: models.ParseModeHTML, ReplyMarkup: kb}); err != nil {
-			h.log.Warn("sendMessage (pick video) failed", "err", err)
+		} else {
+			var err error
+			sent, err = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, MessageThreadID: threadID, Text: videoCaption(r), ParseMode: models.ParseModeHTML, ReplyMarkup: kb})
+			if err != nil {
+				h.log.Warn("sendMessage (pick video) failed", "err", err)
+			}
+		}
+		if token != "" && sent != nil {
+			if err := h.vido.BindIntentMessage(ctx, token, user.ID, chatID, sent.ID); err != nil {
+				h.log.Warn("bind vido card failed", "err", err)
+			}
 		}
 	default: // image
 		if data, ok := h.downloadImage(dctx, coverURL(r)); ok {

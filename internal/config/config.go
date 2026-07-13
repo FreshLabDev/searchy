@@ -36,7 +36,10 @@ type Config struct {
 	Workers int
 
 	// Integrations
-	VidoBotUsername string // @username (no @) of the vido download bot, for handoff
+	VidoBotUsername       string // @username (no @) of the vido download bot, for handoff
+	VidoBridgeEnabled     bool
+	TelegramBotAPIBaseURL string
+	SharedMediaCacheDir   string
 
 	// Postgres for search analytics (stats). Empty disables persistence
 	// (the bot still works; stats just become unavailable).
@@ -80,17 +83,20 @@ func Load() (*Config, error) {
 		// Ceiling for a SearXNG call; direct returns in ~0.8s, so this rarely bites
 		// — it just prevents a hung call from blocking. Must exceed SearXNG's
 		// max_request_timeout (3s).
-		RequestTimeout:  envDur("REQUEST_TIMEOUT", 5*time.Second),
-		MaxResults:      envInt("MAX_RESULTS", 50),
-		DebounceDelay:   envDur("DEBOUNCE_DELAY", 150*time.Millisecond),
-		CacheTTL:        envDur("CACHE_TTL", 5*time.Minute),
-		CacheSize:       envInt("CACHE_SIZE", 2048),
-		Workers:         envInt("WORKERS", 32),
-		VidoBotUsername: strings.TrimPrefix(os.Getenv("VIDO_BOT_USERNAME"), "@"),
-		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		CoreDatabaseURL: os.Getenv("CORE_DATABASE_URL"),
-		InlineCacheTime: envInt("INLINE_CACHE_TIME", 300),
-		StatsCacheTTL:   envDur("STATS_CACHE_TTL", 10*time.Minute),
+		RequestTimeout:        envDur("REQUEST_TIMEOUT", 5*time.Second),
+		MaxResults:            envInt("MAX_RESULTS", 50),
+		DebounceDelay:         envDur("DEBOUNCE_DELAY", 150*time.Millisecond),
+		CacheTTL:              envDur("CACHE_TTL", 5*time.Minute),
+		CacheSize:             envInt("CACHE_SIZE", 2048),
+		Workers:               envInt("WORKERS", 32),
+		VidoBotUsername:       strings.TrimPrefix(os.Getenv("VIDO_BOT_USERNAME"), "@"),
+		VidoBridgeEnabled:     envBool("VIDO_BRIDGE_ENABLED", false),
+		TelegramBotAPIBaseURL: strings.TrimRight(os.Getenv("TELEGRAM_BOT_API_BASE_URL"), "/"),
+		SharedMediaCacheDir:   env("SHARED_MEDIA_CACHE_DIR", "/shared-media-cache"),
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		CoreDatabaseURL:       os.Getenv("CORE_DATABASE_URL"),
+		InlineCacheTime:       envInt("INLINE_CACHE_TIME", 300),
+		StatsCacheTTL:         envDur("STATS_CACHE_TTL", 10*time.Minute),
 	}
 
 	if c.BotToken == "" {
@@ -110,6 +116,9 @@ func Load() (*Config, error) {
 	}
 	if c.SafeSearch < 0 || c.SafeSearch > 2 {
 		c.SafeSearch = 0 // default: show everything, no safe search
+	}
+	if c.VidoBridgeEnabled && c.VidoBotUsername == "" {
+		return nil, fmt.Errorf("VIDO_BOT_USERNAME is required when VIDO_BRIDGE_ENABLED=true")
 	}
 	return c, nil
 }

@@ -14,12 +14,18 @@ services:
       SEARXNG_URL: http://searxng:8080
       HEALTH_ADDR: ":8081"
       DATABASE_URL: postgres://searchy:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@searchy-db:5432/searchy?sslmode=disable
+      TELEGRAM_BOT_API_BASE_URL: ${TELEGRAM_BOT_API_BASE_URL:-http://telegram-bot-api:8081}
+      SHARED_MEDIA_CACHE_DIR: /shared-media-cache
     depends_on:
       searchy-db:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - /opt/stacks/shared-media-cache:/shared-media-cache:ro
     networks:
       - searchy_net
+      - core_net
+      - telegram_bot_api_net
     healthcheck:
       test: ["CMD", "/usr/local/bin/searchy", "-healthcheck"]
       interval: 30s
@@ -50,4 +56,8 @@ volumes:
 
 networks:
   searchy_net:
+    external: true
+  core_net:
+    external: true
+  telegram_bot_api_net:
     external: true

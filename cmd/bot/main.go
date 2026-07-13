@@ -31,6 +31,7 @@ import (
 	"searchy/internal/i18n"
 	"searchy/internal/search"
 	"searchy/internal/search/searxng"
+	vidobridge "searchy/internal/vido"
 )
 
 func main() {
@@ -88,12 +89,29 @@ func main() {
 		defer coreStore.Close()
 	}
 
+	var bridge *vidobridge.Bridge
+	if cfg.VidoBridgeEnabled {
+		bridge, err = vidobridge.Open(context.Background(), cfg.CoreDatabaseURL)
+		if err != nil {
+			logger.Warn("vido bridge unavailable — search remains active", "err", err)
+			bridge = nil
+		} else if bridge == nil {
+			logger.Warn("vido bridge disabled — CORE_DATABASE_URL is unset")
+		} else {
+			logger.Info("vido bridge connected")
+			defer bridge.Close()
+		}
+	}
+
 	handlers := bothandlers.NewHandlers(bothandlers.Options{
 		Aggregator:      agg,
 		Logger:          logger,
 		HTTPClient:      client,
 		Store:           store,
 		Core:            coreStore,
+		Vido:            bridge,
+		VidoBotUsername: cfg.VidoBotUsername,
+		SharedCacheRoot: cfg.SharedMediaCacheDir,
 		MaxResults:      cfg.MaxResults,
 		InlineCacheTime: cfg.InlineCacheTime,
 		DebounceDelay:   cfg.DebounceDelay,
@@ -108,6 +126,11 @@ func main() {
 		bot.WithErrorsHandler(func(err error) {
 			logger.Warn("bot error", "err", err)
 		}),
+	}
+	telegramClient := &http.Client{Timeout: 10 * time.Minute}
+	opts = append(opts, bot.WithHTTPClient(time.Minute, telegramClient))
+	if cfg.TelegramBotAPIBaseURL != "" {
+		opts = append(opts, bot.WithServerURL(cfg.TelegramBotAPIBaseURL))
 	}
 
 	b, err := bot.New(cfg.BotToken, opts...)
@@ -139,9 +162,10 @@ func main() {
 	// Command menus are localized per language (16 × 2 scopes); register them off
 	// the critical path so the handful of setMyCommands calls don't delay polling.
 	go registerCommands(ctx, b, logger)
+	go handlers.RunDeliveryWorker(ctx, b)
 
 	// Health endpoint for container orchestration.
-	healthSrv := startHealthServer(logger)
+	healthSrv := startHealthServer(logger, cfg.VidoBridgeEnabled, bridge)
 	defer func() {
 		shutdownCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
 		defer c()
@@ -223,20 +247,30 @@ func healthPort(addr string) string {
 	return strings.TrimPrefix(addr, ":")
 }
 
-func startHealthServer(logger *slog.Logger) *http.Server {
+func startHealthServer(logger *slog.Logger, bridgeEnabled bool, bridge *vidobridge.Bridge) *http.Server {
 	addr := os.Getenv("HEALTH_ADDR")
 	if addr == "" {
 		addr = ":8081"
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		bridgeStatus := "disabled"
+		if bridgeEnabled {
+			bridgeStatus = "degraded"
+			pingCtx, cancel := context.WithTimeout(request.Context(), 750*time.Millisecond)
+			if bridge != nil && bridge.Healthy(pingCtx) {
+				bridgeStatus = "ok"
+			}
+			cancel()
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":      true,
-			"version": buildinfo.Version,
-			"commit":  buildinfo.Commit,
-			"built":   buildinfo.Date,
+			"ok":          true,
+			"version":     buildinfo.Version,
+			"commit":      buildinfo.Commit,
+			"built":       buildinfo.Date,
+			"vido_bridge": bridgeStatus,
 		})
 	})
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

@@ -21,6 +21,7 @@ import (
 	"searchy/internal/db"
 	"searchy/internal/i18n"
 	"searchy/internal/search"
+	vidobridge "searchy/internal/vido"
 )
 
 // maxPages bounds inline pagination so scrolling can't drive SearXNG forever.
@@ -41,7 +42,10 @@ type Handlers struct {
 	httpClient      *http.Client
 	store           *db.Store
 	core            *core.Core
+	vido            *vidobridge.Bridge
 	botUsername     string
+	vidoBotUsername string
+	sharedCacheRoot string
 	maxResults      int
 	inlineCacheTime int
 	requestTimeout  time.Duration
@@ -50,6 +54,7 @@ type Handlers struct {
 	resultMeta *lru.LRU[string, resultMeta]
 	grids      *lru.LRU[string, *gridSession] // token -> DM/group grid state
 	statsCache *statsCache                    // snapshot cache for /stats panels
+	jobWatch   sync.Map                       // jobID(int64) -> struct{}
 }
 
 type Options struct {
@@ -58,7 +63,10 @@ type Options struct {
 	HTTPClient      *http.Client
 	Store           *db.Store
 	Core            *core.Core
+	Vido            *vidobridge.Bridge
 	BotUsername     string
+	VidoBotUsername string
+	SharedCacheRoot string
 	MaxResults      int
 	InlineCacheTime int
 	DebounceDelay   time.Duration
@@ -74,7 +82,10 @@ func NewHandlers(o Options) *Handlers {
 		httpClient:      o.HTTPClient,
 		store:           o.Store,
 		core:            o.Core,
+		vido:            o.Vido,
 		botUsername:     o.BotUsername,
+		vidoBotUsername: o.VidoBotUsername,
+		sharedCacheRoot: o.SharedCacheRoot,
 		maxResults:      o.MaxResults,
 		inlineCacheTime: o.InlineCacheTime,
 		requestTimeout:  o.RequestTimeout,
@@ -146,7 +157,8 @@ func (h *Handlers) onInline(ctx context.Context, b *bot.Bot, iq *models.InlineQu
 		return // superseded by a newer query
 	}
 
-	inline := buildInlineResults(results, lang)
+	downloadURLs := h.inlineDownloadURLs(dctx, iq.From, results)
+	inline := buildInlineResults(results, lang, downloadURLs)
 	h.cacheMeta(results) // so chosen_inline_result can record what was sent
 	h.log.Info("inline", "page", page, "results", len(inline), "ms", time.Since(start).Milliseconds())
 
@@ -170,7 +182,7 @@ func (h *Handlers) answer(ctx context.Context, b *bot.Bot, id string, results []
 		InlineQueryID: id,
 		Results:       results,
 		CacheTime:     cacheTime,
-		IsPersonal:    false,
+		IsPersonal:    true,
 		NextOffset:    next,
 	})
 	if err != nil {
@@ -197,12 +209,11 @@ func (h *Handlers) onChosen(cr *models.ChosenInlineResult) {
 	}()
 }
 
-// ---- callbacks (menu + video download placeholder) ----
+// ---- callbacks (menu + owner-bound Vido downloads) ----
 
 func (h *Handlers) onCallback(ctx context.Context, b *bot.Bot, cq *models.CallbackQuery) {
-	// Video "Download" placeholder button.
-	if cq.Data == "dl" {
-		h.answerCB(ctx, b, cq.ID, i18n.T(h.langCached(&cq.From), "download.soon"), true)
+	if token, kind, ok := parseDownloadCB(cq.Data); ok {
+		h.onDownloadCallback(ctx, b, cq, token, kind)
 		return
 	}
 
@@ -236,7 +247,7 @@ func (h *Handlers) onCallback(ctx context.Context, b *bot.Bot, cq *models.Callba
 		h.answerCB(ctx, b, cq.ID, "", false)
 		return
 	case action == "home":
-		text, kb := homePanel(lang, h.botUsername, owner)
+		text, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, owner)
 		h.editPanel(ctx, b, chatID, msgID, text, kb)
 	case action == "language":
 		text, kb := languagePanel(lang, owner)
@@ -308,7 +319,7 @@ func (h *Handlers) onMessage(ctx context.Context, b *bot.Bot, msg *models.Messag
 		switch cmd {
 		case "start":
 			lang := h.onStart(ctx, msg.From)
-			t, kb := homePanel(lang, h.botUsername, msg.From.ID)
+			t, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, msg.From.ID)
 			h.sendPanel(ctx, b, msg.Chat.ID, t, kb)
 		case "search":
 			// "/search <query>" runs a full grid search right here (the main way to
