@@ -10,6 +10,19 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-alpha.3 - 2026-07-13
+
+### Fixed
+
+- Validate the bot token with a parameterless HTTP GET so Searchy can start on
+  the pinned local Telegram Bot API server. The Telegram library's malformed
+  empty multipart request was accepted by the cloud API but returned an empty
+  response from the local server.
+
+### Security
+
+- Startup transport errors never include the bot-token-bearing request URL.
+
 ## v0.1.0-alpha.2 - 2026-07-13
 
 ### Added
