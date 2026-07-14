@@ -10,6 +10,14 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-beta.3 - 2026-07-14
+
+### Fixed
+
+- Show exactly one `v` before the version in the About panel, regardless of
+  whether the build metadata uses a release tag (`v0.1.0-beta.3`) or a bare
+  semantic version (`0.1.0-beta.3`).
+
 ## v0.1.0-beta.2 - 2026-07-14
 
 ### Changed
