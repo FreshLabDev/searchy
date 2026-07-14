@@ -299,6 +299,13 @@ func (h *Handlers) answerCB(ctx context.Context, b *bot.Bot, id, text string, al
 	})
 }
 
+func (h *Handlers) answerCBURL(ctx context.Context, b *bot.Bot, id, url string) {
+	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: id,
+		URL:             url,
+	})
+}
+
 // ---- messages (commands + DM search) ----
 
 func (h *Handlers) onMessage(ctx context.Context, b *bot.Bot, msg *models.Message) {

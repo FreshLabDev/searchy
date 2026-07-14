@@ -93,13 +93,12 @@ func (b *Bridge) MintIntent(ctx context.Context, in Intent) (string, error) {
 	if in.TTL <= 0 {
 		in.TTL = 6 * time.Hour
 	}
-	var raw [24]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", fmt.Errorf("generate vido token: %w", err)
+	token, err := newToken()
+	if err != nil {
+		return "", err
 	}
-	token := base64.RawURLEncoding.EncodeToString(raw[:])
 	digest := sha256.Sum256([]byte(token))
-	_, err := b.pool.Exec(ctx, `SELECT vido.create_download_intent(
+	_, err = b.pool.Exec(ctx, `SELECT vido.create_download_intent(
 		$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 		digest[:], in.OwnerUserID, in.Kind, in.DeliveryMode, in.SourceURL,
 		in.Platform, in.SourceSurface, time.Now().Add(in.TTL), in.OriginChatID,
@@ -107,6 +106,41 @@ func (b *Bridge) MintIntent(ctx context.Context, in Intent) (string, error) {
 		nilString(in.TelegramLang), in.ParentJobID)
 	if err != nil {
 		return "", fmt.Errorf("mint vido intent: %w", err)
+	}
+	return token, nil
+}
+
+type SharedDMIntentArgs struct {
+	SourceToken string
+	Actor       User
+	ChatID      int64
+	MessageID   int
+}
+
+// MintSharedDMIntent derives a personal Vido deep-link intent from an exact
+// bound Searchy card. The source URL remains inside Core and is never returned
+// to Searchy.
+func (b *Bridge) MintSharedDMIntent(ctx context.Context, a SharedDMIntentArgs) (string, error) {
+	if !b.Ready() {
+		return "", errors.New("vido bridge unavailable")
+	}
+	token, err := newToken()
+	if err != nil {
+		return "", err
+	}
+	newDigest := tokenHash(token)
+	var ok bool
+	err = b.pool.QueryRow(ctx, `SELECT vido.create_shared_vido_intent(
+		$1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		tokenHash(a.SourceToken), newDigest, a.Actor.ID, a.ChatID, a.MessageID,
+		nilString(a.Actor.Username), nilString(a.Actor.FirstName),
+		nilString(a.Actor.LastName), nilString(a.Actor.LanguageCode),
+	).Scan(&ok)
+	if err != nil {
+		return "", classifyIntentError(err)
+	}
+	if !ok {
+		return "", errors.New("shared vido intent was not created")
 	}
 	return token, nil
 }
@@ -410,6 +444,14 @@ func (b *Bridge) InvalidateFileRef(ctx context.Context, fileID string) error {
 
 func DeepLink(username, token string) string {
 	return fmt.Sprintf("https://t.me/%s?start=ia_%s", username, token)
+}
+
+func newToken() (string, error) {
+	var raw [24]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate vido token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
 func tokenHash(token string) []byte {

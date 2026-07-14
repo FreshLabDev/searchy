@@ -1,6 +1,14 @@
 package bot
 
-import "testing"
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	telegram "github.com/go-telegram/bot"
+)
 
 func TestParseDownloadCallbacks(t *testing.T) {
 	token := "0123456789abcdefghijklmnopqrstuv"
@@ -38,4 +46,43 @@ func TestSearchyDownloadErrorKey(t *testing.T) {
 			t.Fatalf("%s mapped to %q, want %q", input, got, want)
 		}
 	}
+}
+
+func TestAnswerCallbackURLUsesVidoDeepLinkWithoutExtraMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bottest-token/answerCallbackQuery" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
+		if got := r.FormValue("callback_query_id"); got != "callback-1" {
+			t.Errorf("callback_query_id = %q", got)
+		}
+		if got := r.FormValue("url"); got != "https://t.me/vidobot?start=ia_token" {
+			t.Errorf("url = %q", got)
+		}
+		if got := r.FormValue("text"); got != "" {
+			t.Errorf("unexpected callback text = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"ok":true,"result":true}`)
+	}))
+	defer server.Close()
+
+	b, err := telegram.New(
+		"test-token",
+		telegram.WithSkipGetMe(),
+		telegram.WithServerURL(server.URL),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	(&Handlers{}).answerCBURL(
+		context.Background(),
+		b,
+		"callback-1",
+		"https://t.me/vidobot?start=ia_token",
+	)
 }
