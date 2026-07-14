@@ -10,6 +10,26 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-beta.2 - 2026-07-14
+
+### Changed
+
+- Keep the original in-chat Searchy delivery when the user who selected a
+  group video presses Download, but redirect any other group member through a
+  personal Vido deep link. Vido applies the clicking user's settings and sends
+  the result only in that user's private chat, with no extra group message.
+
+### Security
+
+- Derive the personal Vido intent through Core without returning the source URL
+  to Searchy. The new token is bound to the clicking user and the exact original
+  group card (`chat_id` plus `message_id`), retains the source for at most the
+  card's six-hour lifetime, and rejects copied callback data.
+
+### Operations
+
+- Requires Core `v0.1.0-rc.2` (migration 006) and Vido `v2.3.5-beta.3`.
+
 ## v0.1.0-beta.1 - 2026-07-13
 
 ### Fixed

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FreshLabDev/searchy/releases"><img src="https://img.shields.io/github/v/release/FreshLabDev/searchy?include_prereleases&sort=semver&style=for-the-badge&label=latest&labelColor=0f172a&color=4c8c4a" alt="latest version"></a>
-  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--beta.1-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
+  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--beta.2-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/FreshLabDev/searchy?style=for-the-badge&logo=go&logoColor=white&label=go&labelColor=0f172a&color=00ADD8" alt="go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-334155?style=for-the-badge&labelColor=0f172a" alt="license"></a>
 </p>
@@ -46,7 +46,7 @@ Searchy keeps the MVP deliberately narrow:
 
 | Channel | Version | Meaning |
 |:--|:--|:--|
-| Latest | `v0.1.0-beta.1` | Local Bot API startup resilience and Vido bridge hardening |
+| Latest | `v0.1.0-beta.2` | Shared group cards open personal Vido downloads for other users |
 
 Searchy is an early beta. The core inline, DM, and group search flows are
 live-tested against Telegram and a self-hosted SearXNG. See
@@ -125,8 +125,10 @@ Search remains stateless and private. For a selected video, Searchy creates an
 owner-bound intent in the shared core database; Vido applies the user's personal
 download settings and builds a safe DeliveryPlan. Searchy sends the ready media
 as a separate message with its own bot token through the shared local Telegram
-Bot API. Inline download buttons use a Vido DM deep link because Telegram does
-not expose the chosen chat id to another bot.
+Bot API. If another group member presses the same card's Download button,
+Searchy opens a newly owner-bound Vido DM deep link for that person without
+posting anything else in the group. Inline download buttons use the same Vido
+DM handoff because Telegram does not expose the chosen chat id to another bot.
 
 Searchy is one Go service that long-polls Telegram and calls a self-hosted
 SearXNG over HTTP.

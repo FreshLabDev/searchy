@@ -57,6 +57,32 @@ func TestBridgeLeastPrivilegeLifecycle(t *testing.T) {
 	if err := bridge.BindIntentMessage(ctx, token, 515151, chatID, 91); err != nil {
 		t.Fatal(err)
 	}
+	sharedToken, err := bridge.MintSharedDMIntent(ctx, SharedDMIntentArgs{
+		SourceToken: token,
+		Actor: User{
+			ID:           616161,
+			Username:     "shared-card-user",
+			FirstName:    "Shared",
+			LanguageCode: "en",
+		},
+		ChatID:    chatID,
+		MessageID: 91,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sharedToken) != 32 || sharedToken == token {
+		t.Fatalf("unexpected shared token: %q", sharedToken)
+	}
+	_, err = bridge.MintSharedDMIntent(ctx, SharedDMIntentArgs{
+		SourceToken: token,
+		Actor:       User{ID: 717171},
+		ChatID:      chatID,
+		MessageID:   92,
+	})
+	if !errors.Is(err, ErrWrongContext) {
+		t.Fatalf("wrong shared-card context error = %v", err)
+	}
 	_, err = bridge.Enqueue(ctx, EnqueueArgs{
 		Token: token, ActorID: 999999, ChatID: chatID, MessageID: 91,
 		RequestKey: "integration:wrong-owner",

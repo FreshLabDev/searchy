@@ -133,6 +133,39 @@ func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *model
 	})
 	if err != nil {
 		switch {
+		case kind == "video" && errors.Is(err, vidobridge.ErrNotOwner) && h.vidoBotUsername != "":
+			sharedToken, sharedErr := h.vido.MintSharedDMIntent(
+				bridgeCtx,
+				vidobridge.SharedDMIntentArgs{
+					SourceToken: token,
+					Actor: vidobridge.User{
+						ID:           cq.From.ID,
+						Username:     cq.From.Username,
+						FirstName:    cq.From.FirstName,
+						LastName:     cq.From.LastName,
+						LanguageCode: cq.From.LanguageCode,
+					},
+					ChatID:    msg.Chat.ID,
+					MessageID: msg.ID,
+				},
+			)
+			if sharedErr == nil {
+				h.answerCBURL(
+					ctx,
+					b,
+					cq.ID,
+					vidobridge.DeepLink(h.vidoBotUsername, sharedToken),
+				)
+				return
+			}
+			if errors.Is(sharedErr, vidobridge.ErrExpired) {
+				h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.expired"), true)
+				return
+			}
+			if !errors.Is(sharedErr, vidobridge.ErrWrongContext) {
+				h.log.Warn("mint shared vido intent failed", "err", sharedErr)
+			}
+			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.notyours"), true)
 		case errors.Is(err, vidobridge.ErrNotOwner), errors.Is(err, vidobridge.ErrWrongContext):
 			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.notyours"), true)
 		case errors.Is(err, vidobridge.ErrExpired):

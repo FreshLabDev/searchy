@@ -123,6 +123,13 @@ personal Vido settings. Searchy receives no source URL or settings back: it
 claims a versioned DeliveryPlan, validates its operation/path whitelist, and
 sends a new message in the original chat/topic with its own token.
 
+Migration 006 makes a bound group card shareable without making its token
+publicly consumable. The selector still receives Searchy delivery in the group;
+another user receives a new personal Vido DM intent through
+`answerCallbackQuery.url`. Core validates the exact card chat/message and binds
+the derived token to that user. Searchy never receives the copied source URL,
+and no handoff message is posted in the group.
+
 Inline cards stay cover-only and personal. Their Download button is a Vido
 `/start ia_...` deep link because Telegram does not expose the chosen chat id to
 Vido. The Vido flow uses chat actions without a visible starting message.
