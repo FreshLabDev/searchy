@@ -170,7 +170,11 @@ func infoPanel(lang string, owner int64, titleKey, bodyKey string, bodyArgs ...s
 }
 
 func aboutBody(lang string, owner int64) (string, *models.InlineKeyboardMarkup) {
-	return infoPanel(lang, owner, "about.title", "about.body", "version", buildinfo.Version, "date", buildinfo.Date)
+	return infoPanel(lang, owner, "about.title", "about.body", "version", aboutVersion(buildinfo.Version), "date", buildinfo.Date)
+}
+
+func aboutVersion(version string) string {
+	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
