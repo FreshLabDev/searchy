@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FreshLabDev/searchy/releases"><img src="https://img.shields.io/github/v/release/FreshLabDev/searchy?include_prereleases&sort=semver&style=for-the-badge&label=latest&labelColor=0f172a&color=4c8c4a" alt="latest version"></a>
-  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--beta.2-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
+  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0--rc.1-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/FreshLabDev/searchy?style=for-the-badge&logo=go&logoColor=white&label=go&labelColor=0f172a&color=00ADD8" alt="go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-334155?style=for-the-badge&labelColor=0f172a" alt="license"></a>
 </p>
@@ -46,7 +46,8 @@ Searchy keeps the MVP deliberately narrow:
 
 | Channel | Version | Meaning |
 |:--|:--|:--|
-| Latest | `v0.1.0-beta.2` | Shared group cards open personal Vido downloads for other users |
+| Candidate | `v0.1.0-rc.1` | Pinned-engine release candidate for the owner-bound Vido bridge |
+| Stable | `v0.1.0` | Follows only after the complete Searchy × Vido smoke matrix passes |
 
 Searchy is an early beta. The core inline, DM, and group search flows are
 live-tested against Telegram and a self-hosted SearXNG. See
@@ -63,7 +64,7 @@ live-tested against Telegram and a self-hosted SearXNG. See
 | **DM search** | Any text message runs a search and returns a single numbered result grid |
 | **Group search** | `/search <query>` returns the same grid; anyone can page or open an item |
 | **Category prefixes** | `i:` images only, `v:` videos only, otherwise both |
-| **Video cards** | Cover + title with Open and owner-bound Download buttons powered by Vido |
+| **Video cards** | Cover + title with Open and Download buttons: the selector receives Searchy delivery, while another group member is handed off to a private Vido job |
 | **Menu** | `/start` opens an inline panel: language, stats, help, about |
 | **16 languages** | Full i18n; the chosen language is remembered across the sibling bots via **core** |
 | **Private analytics** | Optional `/stats` panel (personal + global) built from counts only |
@@ -209,9 +210,10 @@ saved language depend on them.
   core. In production this points at the shared **core** Postgres as the
   least-privilege role `searchy_core` with `search_path=searchy`, so the
   analytics tables live in a `searchy` schema there.
-- **Shared `core` DB** — `CORE_DATABASE_URL`. All the sibling bots (searchy,
-  vido, quoto, branchy) share one **core** Postgres, keyed on the global Telegram
-  id, for identity, presence, and the user's saved language. Searchy identifies
+- **Shared `core` DB** — `CORE_DATABASE_URL`. In production both Searchy
+  connections point to the same `core-postgres` instance with different
+  `search_path` and privilege boundaries. Vido, Searchy, Quoto, Branchy, and
+  makeitMD share the global Telegram identity hub. Searchy identifies
   itself as `searchy` and touches core only through its SECURITY DEFINER
   functions (`core.touch`, `core.set_language`, `core.effective_language`).
 

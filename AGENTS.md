@@ -23,9 +23,13 @@ private by design, and production-minded.
 - Inline search is the primary surface; DM and group search use a numbered grid.
 - The `/start` menu is inline and callback-driven (language, stats, help, about).
 - In groups, searching is explicit via `/search`; plain messages are ignored.
-- Do not add audio/music search, a `@vido` download implementation, webhook mode,
-  or delivery/search surfaces beyond these unless explicitly requested — the
-  `internal/vido` seam and `WEBHOOK_SECRET` are placeholders only.
+- Do not add audio/music search, webhook mode, or search/delivery surfaces
+  beyond these unless explicitly requested.
+- `internal/vido` is a production least-privilege bridge, not a downloader:
+  Searchy creates owner-bound intents and executes validated `DeliveryPlan v1`
+  operations, while Vido owns URLs, settings, extraction, shared-cache writes,
+  error classification, and Vido-DM delivery. `WEBHOOK_SECRET` remains an
+  unwired placeholder.
 
 ## Privacy Invariants
 
@@ -136,6 +140,10 @@ docker compose -f deploy/docker-compose.yml config
   bot runs cleanly with both databases unset.
 - No query text appears in analytics or logs.
 - `/healthz` reports the build version, commit, and date.
+- The Searchy × Vido matrix passes for DM, group selector, another group member,
+  topic, inline deep link, audio, terminal errors, and cached `file_id` reuse.
+- A fresh production bridge smoke produces a delivered `target_bot=searchy`
+  job; search-only activity is not sufficient evidence for an RC or stable tag.
 
 ## License
 

@@ -8,8 +8,11 @@ Searchy is one Go service with three runtime surfaces:
 
 The service holds no durable state of its own beyond optional analytics. Search
 is stateless: each query is answered from SearXNG (through an in-process cache),
-and results are never written to disk. Two Postgres connections are used, and
-both are optional — the bot runs fine with neither.
+and results are never written to disk. Two logical Postgres connections are
+used, and both are optional — the bot runs fine with neither. Production points
+both at one shared `core-postgres` instance: the analytics connection is
+restricted to schema `searchy`, while the core connection exposes only the
+shared functions and bridge API granted to `searchy_core`.
 
 ## Packages
 
@@ -29,8 +32,9 @@ both are optional — the bot runs fine with neither.
 - `internal/bot`: the Telegram layer — the update router, inline handler,
   DM/group grid handler, the `/start` menu, per-user debounce, rendering, and
   analytics/language helpers.
-- `internal/db`: searchy's own Postgres store for private search analytics
-  (searches and selections) — no query text, no users table.
+- `internal/db`: Searchy's logical Postgres schema for private search analytics
+  (searches and selections) — no query text, no users table. Production hosts
+  it inside the shared physical `core-postgres` instance.
 - `internal/core`: a nil-safe client for the shared cross-bot **core** Postgres
   (identity, presence, language) keyed on the global Telegram id.
 - `internal/i18n`: user-facing strings (16 languages) with `{placeholder}`
@@ -116,12 +120,14 @@ for analytics and skip core entirely.
 
 ## Vido bridge
 
-Video cards in DM/group search receive an owner-bound `vd:` callback. Searchy
-stores only a SHA-256 token through core migration 004, binds it to the sent
-card, and asks Vido's standalone worker to process the source with the user's
-personal Vido settings. Searchy receives no source URL or settings back: it
-claims a versioned DeliveryPlan, validates its operation/path whitelist, and
-sends a new message in the original chat/topic with its own token.
+Video cards in DM/group search receive an owner-bound `vd:` callback. Migration
+004 creates the bridge and hashed intents, migration 005 makes send/ACK and
+terminal notifications durable, and migration 006 adds the non-selector group
+handoff. Searchy binds the intent to the sent card and asks Vido's standalone
+worker to process the source with the user's personal Vido settings. Searchy
+receives no source URL or settings back: it claims a versioned DeliveryPlan,
+validates its operation/path whitelist, and sends a new message in the original
+chat/topic with its own token.
 
 Migration 006 makes a bound group card shareable without making its token
 publicly consumable. The selector still receives Searchy delivery in the group;

@@ -39,10 +39,11 @@ Key choices baked into the client:
   every enabled engine for the category regardless of `engines`, firing ~15
   engines at once and overloading a private instance's network layer (engines
   then fail with proxy errors). Restricting to a few named engines keeps queries
-  fast and reliable. If no engines are configured for the requested categories,
-  the client falls back to `categories`.
+  fast and reliable. If no pinned engine is configured for the requested media
+  categories, the client rejects the request before contacting SearXNG.
 - **Engine sets are configurable** via `ENGINES_IMAGES` and `ENGINES_VIDEOS`
-  (comma-separated). Defaults pin a handful of reliable image and video engines.
+  (comma-separated). Runtime defaults always provide a pinned set for both
+  categories; production requests must never fall back to `categories`.
 - **Pagination.** `pageno` is 1-based (the bot's 0-based page + 1). SearXNG does
   not report total pages reliably, so the provider reports "another page may
   exist" whenever the current page returned any raw results; the caller caps the
