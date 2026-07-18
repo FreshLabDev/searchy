@@ -10,6 +10,11 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+### Operations
+
+- Move GitHub Actions to their Node 24 runtime majors, removing the Node 20
+  deprecation warnings without changing the Searchy runtime image.
+
 ## v0.1.0-rc.1 - 2026-07-18
 
 ### Fixed
