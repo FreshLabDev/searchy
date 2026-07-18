@@ -27,13 +27,19 @@ Development happens on `dev`; releases are published from `main`
 
 1. On `dev`, finish code and documentation changes.
 2. Run the verification commands from `AGENTS.md`.
-3. Run a real smoke test (an inline search and a DM/group search) for `beta`,
-   `rc`, and public releases.
+3. Run a real smoke test for `beta`, `rc`, and public releases:
+   - inline image and video cards plus pagination;
+   - DM and group numbered grids;
+   - selector Download delivery from Searchy in the same chat/topic;
+   - another group member's Download handoff to a private Vido job;
+   - inline Download handoff to Vido DM;
+   - audio follow-up, terminal downloader error, and cached `file_id` reuse;
+   - a newly delivered production bridge row with `target_bot=searchy`.
 4. On `dev`, move relevant `Unreleased` entries into a version section, and keep
    a fresh empty `## Unreleased` above it:
 
    ```text
-   ## v0.1.0-alpha.1 - 2026-07-04
+   ## v0.1.0-rc.1 - 2026-07-18
    ```
 
 5. Merge `dev` into `main`: `git checkout main && git merge --no-ff dev`.
@@ -46,7 +52,7 @@ Development happens on `dev`; releases are published from `main`
 Use this shape for release notes:
 
 ```text
-v0.1.0-alpha.1
+v0.1.0-rc.1
 
 Summary:
 - Short release purpose.
@@ -76,12 +82,12 @@ For the public MVP tag `v0.1.0`, publish a normal GitHub Release.
 Create a pre-release:
 
 ```sh
-git tag -a v0.1.0-alpha.1 -m "v0.1.0-alpha.1"
+git tag -a v0.1.0-rc.1 -m "v0.1.0-rc.1"
 git push origin main
-git push origin v0.1.0-alpha.1
-gh release create v0.1.0-alpha.1 \
+git push origin v0.1.0-rc.1
+gh release create v0.1.0-rc.1 \
   --prerelease \
-  --title "v0.1.0-alpha.1" \
+  --title "v0.1.0-rc.1" \
   --notes-file /tmp/searchy-release-notes.md
 ```
 

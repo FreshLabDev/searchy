@@ -25,8 +25,10 @@ Typing `@yourbot query` in any chat sends an `inline_query`. Inline mode must be
 enabled for the bot in BotFather (`/setinline`) or these updates never arrive.
 
 - Results are `InlineQueryResultPhoto` cards: images as their photo, and videos
-  as a cover photo with an "Open on <platform>" link button and a "Download"
-  placeholder button.
+  as a cover photo with an "Open on <platform>" link and a "Download" URL button
+  leading to an owner-bound Vido private-chat job. Telegram does not expose the
+  destination chat to Vido, so inline mode never attempts direct delivery into
+  the chosen chat.
 - Up to `MAX_RESULTS` (Telegram's hard cap of 50) results per answer, with a
   `next_offset` page index to load more as the user scrolls (bounded to 10
   pages).
@@ -61,6 +63,12 @@ Paging edits the grid image in place. Tapping a number sends that item full: an
 image as a photo, a video as a cover card with the same Open/Download buttons.
 Grid buttons are **shared** — in a group, anyone can page or open an item, so
 there is no per-user ownership check on them.
+
+The user who selected a video owns its Searchy delivery callback and receives a
+new Searchy message in the same chat/topic. If another group member presses the
+same Download button, Core validates the exact card and Searchy opens a newly
+owner-bound Vido deep link for that person. Nothing extra is posted in the
+group.
 
 ## The Menu
 

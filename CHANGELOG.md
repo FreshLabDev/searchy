@@ -10,6 +10,17 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0-rc.1 - 2026-07-18
+
+### Fixed
+
+- Reject an empty pinned-engine set instead of falling back to SearXNG
+  `categories`, which could fan out to every enabled engine and overload the
+  private instance.
+- Align the public, operator, and agent documentation with `v0.1.0-rc.1`, the
+  production Vido bridge, the single physical `core-postgres` deployment, and
+  the complete Searchy × Vido RC smoke gate.
+
 ## v0.1.0-beta.3 - 2026-07-14
 
 ### Fixed

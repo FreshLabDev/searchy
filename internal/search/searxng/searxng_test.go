@@ -1,11 +1,53 @@
 package searxng
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"searchy/internal/search"
 )
+
+func TestSearchPinsEnginesWithoutCategories(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("engines"); got != "bing images" {
+			t.Errorf("engines = %q, want pinned image engine", got)
+		}
+		if _, present := r.URL.Query()["categories"]; present {
+			t.Error("Search must never send SearXNG categories")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := New(Options{
+		BaseURL:       server.URL,
+		HTTP:          server.Client(),
+		EnginesImages: "bing images",
+	})
+	if _, _, err := client.Search(context.Background(), "redacted", []search.Category{search.CatImage}, 0); err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+}
+
+func TestSearchRejectsMissingPinnedEngines(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	}))
+	t.Cleanup(server.Close)
+
+	client := New(Options{BaseURL: server.URL, HTTP: server.Client()})
+	if _, _, err := client.Search(context.Background(), "redacted", []search.Category{search.CatVideo}, 0); err == nil {
+		t.Fatal("Search() error = nil, want missing pinned-engine error")
+	}
+	if called {
+		t.Fatal("Search issued a request without pinned engines")
+	}
+}
 
 func TestValidURL(t *testing.T) {
 	good := []string{

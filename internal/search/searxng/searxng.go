@@ -114,11 +114,11 @@ func (c *Client) Search(ctx context.Context, query string, cats []search.Categor
 	// once, which overloads this SearXNG instance's network layer (every engine
 	// then fails with httpx.ProxyError; only single/few-engine queries succeed).
 	// Sending only `engines` restricts to exactly these few → fast + reliable.
-	if eng := c.enginesFor(cats); eng != "" {
-		q.Set("engines", eng)
-	} else {
-		q.Set("categories", joinCategories(cats)) // fallback if no engines configured
+	eng := c.enginesFor(cats)
+	if eng == "" {
+		return nil, false, fmt.Errorf("no pinned SearXNG engines configured for requested media categories")
 	}
+	q.Set("engines", eng)
 	q.Set("pageno", strconv.Itoa(page+1))
 	q.Set("safesearch", strconv.Itoa(c.safeSearch))
 	if c.language != "" {
@@ -279,14 +279,6 @@ func (c *Client) enginesFor(cats []search.Category) string {
 		}
 	}
 	return strings.Join(parts, ",")
-}
-
-func joinCategories(cats []search.Category) string {
-	s := make([]string, len(cats))
-	for i, c := range cats {
-		s[i] = string(c)
-	}
-	return strings.Join(s, ",")
 }
 
 // parseDuration accepts SearXNG's `length` field which may be a JSON string

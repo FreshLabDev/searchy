@@ -27,7 +27,7 @@ v0.1.0-alpha.N  further alpha hardening
 v0.1.0-beta.1   first real Telegram/SearXNG beta
 v0.1.0-beta.2   personal Vido DM handoff from shared group cards
 v0.1.0-beta.3   About-panel version display fix
-v0.1.0-rc.1     release candidate after beta fixes
+v0.1.0-rc.1     joint Searchy × Vido candidate after the full delivery smoke
 v0.1.0          public MVP release
 ```
 
