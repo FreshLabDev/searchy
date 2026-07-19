@@ -10,6 +10,34 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.1.0 - 2026-07-19
+
+First stable Searchy release: private image and video search for Telegram with
+personal Vido downloads.
+
+### Highlights
+
+- Search images and videos inline, in direct messages, and in groups with
+  paginated results and numbered media grids.
+- Download video or audio through Vido with the clicking user's personal
+  settings, including private handoff for shared group and inline cards.
+- Keep inline results personal, preserve the selected language through Core,
+  and expose useful personal and global statistics without storing queries.
+
+### Reliability and privacy
+
+- Never persist or log search text; analytics contain only counts, timings,
+  categories, result types, and engines.
+- Use pinned SearXNG engines and keep search available when analytics, Core, or
+  the Vido bridge is temporarily unavailable.
+- Prevent duplicate deliveries with owner-bound intents, explicit retry for
+  uncertain sends, and bot-specific Telegram file reuse.
+
+### Operations
+
+- Move GitHub Actions to their Node 24 runtime majors, removing the Node 20
+  deprecation warnings without changing the Searchy runtime image.
+
 ## v0.1.0-rc.1 - 2026-07-18
 
 ### Fixed
