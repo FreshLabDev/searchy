@@ -17,7 +17,7 @@ func TestSearchDefaults(t *testing.T) {
 	if config.EnginesImages != "bing images,duckduckgo images" {
 		t.Errorf("unexpected core images: %q", config.EnginesImages)
 	}
-	if config.EnginesVideosDiscovery != "bilibili,sepiasearch,peertube" {
+	if config.EnginesVideosDiscovery != "bilibili,peertube" {
 		t.Errorf("unexpected discovery videos: %q", config.EnginesVideosDiscovery)
 	}
 	if config.Language != "" {

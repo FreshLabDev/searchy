@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FreshLabDev/searchy/releases"><img src="https://img.shields.io/github/v/release/FreshLabDev/searchy?include_prereleases&sort=semver&style=for-the-badge&label=latest&labelColor=0f172a&color=4c8c4a" alt="latest version"></a>
-  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.2.0--alpha.1-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
+  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.2.0--alpha.2-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/FreshLabDev/searchy?style=for-the-badge&logo=go&logoColor=white&label=go&labelColor=0f172a&color=00ADD8" alt="go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-334155?style=for-the-badge&labelColor=0f172a" alt="license"></a>
 </p>
@@ -47,7 +47,7 @@ Searchy keeps the MVP deliberately narrow:
 | Channel | Version | Meaning |
 |:--|:--|:--|
 | Stable | `v0.1.0` | Private image and video search with personal Vido delivery |
-| Alpha | `v0.2.0-alpha.1` | Relevance ranking, long-tail discovery and per-user search language |
+| Alpha | `v0.2.0-alpha.2` | Relevance discovery with dead-result and cover-card hardening |
 | Next | `Unreleased` | Compatible fixes and MVP improvements land on `dev` |
 
 Searchy's inline, DM, group, and Vido delivery flows are live-tested against
@@ -178,7 +178,7 @@ only `BOT_TOKEN` set.
 | `ENGINES_IMAGES` | no | Bing, DuckDuckGo | Pinned core image engines |
 | `ENGINES_VIDEOS` | no | YouTube, DuckDuckGo, Dailymotion, Bing Videos | Pinned core video engines |
 | `ENGINES_IMAGES_DISCOVERY` | no | FindThatMeme, Pinterest, Giphy, Frinkiac, Wikimedia | Pinned long-tail image engines |
-| `ENGINES_VIDEOS_DISCOVERY` | no | Bilibili, SepiaSearch, PeerTube | Pinned long-tail video engines |
+| `ENGINES_VIDEOS_DISCOVERY` | no | Bilibili, PeerTube | Pinned long-tail video engines |
 | `SAFE_SEARCH` | no | `0` | `0` off / `1` moderate / `2` strict |
 | `IMAGE_PROXY` | no | `false` | Route media URLs through SearXNG's proxy (keep off unless SearXNG is public HTTPS) |
 | `LANGUAGE` | no | empty | Optional operator override; empty uses the user's saved language |

@@ -73,7 +73,7 @@ func Load() (*Config, error) {
 		EnginesImages:          env("ENGINES_IMAGES", "bing images,duckduckgo images"),
 		EnginesVideos:          env("ENGINES_VIDEOS", "youtube,duckduckgo videos,dailymotion,bing videos"),
 		EnginesImagesDiscovery: env("ENGINES_IMAGES_DISCOVERY", "findthatmeme,pinterest,giphy,frinkiac,wikicommons.images"),
-		EnginesVideosDiscovery: env("ENGINES_VIDEOS_DISCOVERY", "bilibili,sepiasearch,peertube"),
+		EnginesVideosDiscovery: env("ENGINES_VIDEOS_DISCOVERY", "bilibili,peertube"),
 		SafeSearch:             envInt("SAFE_SEARCH", 0),
 		ImageProxy:             envBool("IMAGE_PROXY", false),
 		Language:               strings.TrimSpace(os.Getenv("LANGUAGE")),
