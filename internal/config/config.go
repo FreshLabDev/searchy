@@ -16,17 +16,21 @@ type Config struct {
 	WebhookSecret string // only used in webhook mode (not wired in v1)
 
 	// SearXNG backend
-	SearxngURL    string
-	EnginesImages string // comma-separated engine names pinned for images
-	EnginesVideos string // comma-separated engine names pinned for videos
-	SafeSearch    int    // 0=off, 1=moderate, 2=strict
-	ImageProxy    bool   // route image URLs through SearXNG's proxy
-	Language      string // SearXNG search language; "all" = neutral (no filter)
+	SearxngURL             string
+	EnginesImages          string // core image engines
+	EnginesVideos          string // core video engines
+	EnginesImagesDiscovery string // unusual/long-tail image engines
+	EnginesVideosDiscovery string // unusual/long-tail video engines
+	SafeSearch             int    // 0=off, 1=moderate, 2=strict
+	ImageProxy             bool   // route image URLs through SearXNG's proxy
+	Language               string // optional operator override; empty uses the user's language
 
 	// Search behaviour
-	RequestTimeout time.Duration // per backend call
-	MaxResults     int           // hard cap per inline answer (Telegram max 50)
-	DebounceDelay  time.Duration // inline debounce per user
+	RequestTimeout       time.Duration // per backend call
+	MaxResults           int           // hard cap per inline answer (Telegram max 50)
+	DebounceDelay        time.Duration // inline debounce per user
+	DiscoveryPercent     int           // long-tail share for a healthy core result set
+	DiscoveryWeakPercent int           // long-tail share for a weak core result set
 
 	// Cache
 	CacheTTL  time.Duration
@@ -65,27 +69,20 @@ func Load() (*Config, error) {
 		BotToken:      os.Getenv("BOT_TOKEN"),
 		WebhookSecret: os.Getenv("WEBHOOK_SECRET"),
 		SearxngURL:    env("SEARXNG_URL", "http://localhost:8080"),
-		// Pinned sets, sent via engines= WITHOUT categories (see provider). Kept
-		// under the concurrency limit (~8 ok, ~15 overloads → proxy errors).
-		// bing/ddg give volume; unsplash/flickr/wikicommons add CLEAN curated
-		// photos (bing/ddg flood news/junk for place/topic queries). The bot
-		// interleaves engines round-robin so curated photos aren't buried.
-		// duckduckgo videos is a cross-platform meta-engine.
-		// flickr dropped — it's slow (~1.5s, often times out). unsplash (0.43s) +
-		// wikicommons (0.67s) give the clean curated photos fast.
-		EnginesImages: env("ENGINES_IMAGES", "bing images,duckduckgo images,unsplash,wikicommons.images"),
-		EnginesVideos: env("ENGINES_VIDEOS", "youtube,dailymotion,duckduckgo videos"),
-		SafeSearch:    envInt("SAFE_SEARCH", 0),
-		ImageProxy:    envBool("IMAGE_PROXY", false),
-		// "all" = no language filter (neutral). Combined with Tor egress this
-		// fully neutralizes geo/language bias. Override to e.g. "en"/"uk" if wanted.
-		Language: env("LANGUAGE", "all"),
-		// Ceiling for a SearXNG call; direct returns in ~0.8s, so this rarely bites
-		// — it just prevents a hung call from blocking. Must exceed SearXNG's
-		// max_request_timeout (3s).
-		RequestTimeout:        envDur("REQUEST_TIMEOUT", 5*time.Second),
+		// Each bounded request pins one pool explicitly and never sends categories.
+		EnginesImages:          env("ENGINES_IMAGES", "bing images,duckduckgo images"),
+		EnginesVideos:          env("ENGINES_VIDEOS", "youtube,duckduckgo videos,dailymotion,bing videos"),
+		EnginesImagesDiscovery: env("ENGINES_IMAGES_DISCOVERY", "findthatmeme,pinterest,giphy,frinkiac,wikicommons.images"),
+		EnginesVideosDiscovery: env("ENGINES_VIDEOS_DISCOVERY", "bilibili,sepiasearch,peertube"),
+		SafeSearch:             envInt("SAFE_SEARCH", 0),
+		ImageProxy:             envBool("IMAGE_PROXY", false),
+		Language:               strings.TrimSpace(os.Getenv("LANGUAGE")),
+		// Covers the parallel primary pools plus one bounded English core fallback.
+		RequestTimeout:        envDur("REQUEST_TIMEOUT", 8*time.Second),
 		MaxResults:            envInt("MAX_RESULTS", 50),
 		DebounceDelay:         envDur("DEBOUNCE_DELAY", 150*time.Millisecond),
+		DiscoveryPercent:      envInt("DISCOVERY_PERCENT", 30),
+		DiscoveryWeakPercent:  envInt("DISCOVERY_WEAK_PERCENT", 50),
 		CacheTTL:              envDur("CACHE_TTL", 5*time.Minute),
 		CacheSize:             envInt("CACHE_SIZE", 2048),
 		Workers:               envInt("WORKERS", 32),
@@ -116,6 +113,12 @@ func Load() (*Config, error) {
 	}
 	if c.SafeSearch < 0 || c.SafeSearch > 2 {
 		c.SafeSearch = 0 // default: show everything, no safe search
+	}
+	if c.DiscoveryPercent < 0 || c.DiscoveryPercent > 100 {
+		c.DiscoveryPercent = 30
+	}
+	if c.DiscoveryWeakPercent < c.DiscoveryPercent || c.DiscoveryWeakPercent > 100 {
+		c.DiscoveryWeakPercent = max(50, c.DiscoveryPercent)
 	}
 	if c.VidoBridgeEnabled && c.VidoBotUsername == "" {
 		return nil, fmt.Errorf("VIDO_BOT_USERNAME is required when VIDO_BRIDGE_ENABLED=true")

@@ -29,13 +29,14 @@ v0.1.0-beta.2   personal Vido DM handoff from shared group cards
 v0.1.0-beta.3   About-panel version display fix
 v0.1.0-rc.1     joint Searchy × Vido candidate after the full delivery smoke
 v0.1.0          public MVP release
+v0.2.0-alpha.1  relevance, discovery pools and per-user search locale
 ```
 
 After the public MVP release:
 
 ```text
 v0.1.1          bug fixes without new behavior
-v0.2.0          notable UX, operations, or MVP-compatible feature improvements
+v0.2.0          stabilized relevance and discovery improvements
 v1.0.0          stable production contract after real production usage
 ```
 

@@ -80,17 +80,27 @@ func main() {
 	client := httpx.New()
 
 	provider := searxng.New(searxng.Options{
-		BaseURL:       cfg.SearxngURL,
-		HTTP:          client,
-		Logger:        logger,
-		EnginesImages: cfg.EnginesImages,
-		EnginesVideos: cfg.EnginesVideos,
-		SafeSearch:    cfg.SafeSearch,
-		ImageProxy:    cfg.ImageProxy,
-		Language:      cfg.Language,
+		BaseURL:                cfg.SearxngURL,
+		HTTP:                   client,
+		Logger:                 logger,
+		EnginesImages:          cfg.EnginesImages,
+		EnginesVideos:          cfg.EnginesVideos,
+		EnginesImagesDiscovery: cfg.EnginesImagesDiscovery,
+		EnginesVideosDiscovery: cfg.EnginesVideosDiscovery,
+		SafeSearch:             cfg.SafeSearch,
+		ImageProxy:             cfg.ImageProxy,
+		Language:               cfg.Language,
 	})
 
-	agg := search.NewAggregator(provider, cfg.CacheSize, cfg.CacheTTL, cfg.MaxResults, cfg.RequestTimeout)
+	agg := search.NewAggregator(provider, search.AggregatorOptions{
+		CacheSize:            cfg.CacheSize,
+		CacheTTL:             cfg.CacheTTL,
+		MaxResults:           cfg.MaxResults,
+		Timeout:              cfg.RequestTimeout,
+		DiscoveryPercent:     cfg.DiscoveryPercent,
+		DiscoveryWeakPercent: cfg.DiscoveryWeakPercent,
+		Logger:               logger,
+	})
 
 	// Postgres for search analytics. Best-effort: if it's unset or unreachable,
 	// the bot still runs (stats disabled).

@@ -1,27 +1,28 @@
-# searchy bot stack on WS04 (/opt/stacks/searchy): the Go bot + its Postgres.
-# The bot talks to the independent SearXNG stack over the shared external network
-# `searchy_net` (host `searxng`), and to its own Postgres (host `searchy-db`).
-# Outbound only — no published ports (long polling to api.telegram.org).
+# Searchy production stack on WS04. Identity, language and analytics use the
+# shared core-postgres through least-privilege URLs from .env.
+name: searchy
+
 services:
   bot:
     build:
       context: ./app
       dockerfile: Dockerfile
-    image: searchy-bot:local
+      args:
+        VERSION: ${SEARCHY_VERSION:-dev}
+        COMMIT: ${SEARCHY_COMMIT:-none}
+        DATE: ${SEARCHY_BUILD_DATE:-unknown}
+    image: searchy-bot:${SEARCHY_IMAGE_TAG:-local}
     container_name: searchy-bot
-    env_file: .env
+    env_file:
+      - ./.env
     environment:
       SEARXNG_URL: http://searxng:8080
       HEALTH_ADDR: ":8081"
-      DATABASE_URL: postgres://searchy:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@searchy-db:5432/searchy?sslmode=disable
       TELEGRAM_BOT_API_BASE_URL: ${TELEGRAM_BOT_API_BASE_URL:-http://telegram-bot-api:8081}
       SHARED_MEDIA_CACHE_DIR: /shared-media-cache
-    depends_on:
-      searchy-db:
-        condition: service_healthy
-    restart: unless-stopped
     volumes:
       - /opt/stacks/shared-media-cache:/shared-media-cache:ro
+    restart: unless-stopped
     networks:
       - searchy_net
       - core_net
@@ -32,27 +33,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
-
-  searchy-db:
-    image: postgres:17-alpine
-    container_name: searchy-db
-    environment:
-      POSTGRES_USER: searchy
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: searchy
-    volumes:
-      - searchy-db-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - searchy_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U searchy -d searchy"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  searchy-db-data:
 
 networks:
   searchy_net:

@@ -3,7 +3,7 @@
 # Not published to the host — internal use by the searchy bot only.
 services:
   searxng:
-    image: searxng/searxng:latest
+    image: ${SEARXNG_IMAGE:-searxng/searxng@sha256:77b6ec55d5176fc47cfe91df5e182393133305358741d0c80ebbeec75ac39f99}
     container_name: searxng
     volumes:
       - ./searxng:/etc/searxng:rw

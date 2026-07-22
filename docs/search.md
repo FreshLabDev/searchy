@@ -1,111 +1,115 @@
 # Search Integration
 
-Searchy searches through a self-hosted **SearXNG** instance over its JSON API.
-The provider lives in `internal/search/searxng` and implements the
-`search.Provider` interface; the `search.Aggregator` wraps it with caching and
-de-duplication.
+Searchy uses a private self-hosted SearXNG instance as a bounded media-search
+backend. The provider normalizes engine-specific JSON; the aggregator owns
+caching, pool orchestration, fallbacks, de-duplication and ranking.
 
-## SearXNG Requirements
+## SearXNG requirements
 
-SearXNG's JSON API is **off by default**. The bot needs it on:
+The bundled configuration enables JSON, keeps the instance internal, disables
+the public limiter, uses direct egress and pins the proven `2026.6.24` production
+image by immutable digest. The `2026.7.16` candidate is intentionally not used:
+DuckDuckGo Images returned access-denied failures after benchmark load.
 
 ```yaml
-search:
-  formats: [html, json]   # without `json`, format=json returns HTTP 403
 server:
-  limiter: false          # fine for a private, internal-only instance
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: POST
+search:
+  safe_search: 0
+  formats: [html, json]
 ```
 
-The bundled `deploy/searxng/settings.yml` already sets this. After editing
-`settings.yml`, restart the container. A `403` from `format=json` almost always
-means the JSON format is not actually enabled (or the service was not restarted)
-— the bot surfaces that as a clear error rather than a generic failure.
+Do not expose this limiter-free instance or point Searchy at a public instance.
+Telegram fetches media itself, so `IMAGE_PROXY` stays off while SearXNG is
+internal-only.
 
-> Do not point Searchy at a public SearXNG instance: they typically disable JSON
-> and run bot detection. Self-host, and keep the instance internal-only.
+## Requests and pools
 
-## Querying
+Searchy sends form-encoded `POST /search` with `q`, `format=json`, `engines`,
+`pageno`, `safesearch` and `language`. Query text therefore does not appear in
+access URLs. `categories` is never sent because it would fan out to every engine
+in the category.
 
-Each search issues one request:
+Each search starts two explicit requests in parallel:
 
-```text
-GET {SEARXNG_URL}/search?format=json&engines=<pinned>&pageno=<n>&safesearch=<0|1|2>&language=<lang>
+- Core images: Bing and DuckDuckGo.
+- Core videos: YouTube, DuckDuckGo Videos, Dailymotion and Bing Videos.
+- Discovery images: FindThatMeme, Pinterest, Giphy, Frinkiac and Wikimedia.
+- Discovery videos: Bilibili, SepiaSearch and PeerTube.
+
+Core lists use `ENGINES_IMAGES` and `ENGINES_VIDEOS`; discovery lists use
+`ENGINES_IMAGES_DISCOVERY` and `ENGINES_VIDEOS_DISCOVERY`. Missing pinned lists
+are rejected before contacting SearXNG.
+
+The saved user language is passed per request and is part of the cache key.
+Chinese maps to SearXNG's search locale `zh-CN`; the other supported Searchy
+codes map directly.
+An explicit `LANGUAGE` environment value overrides all users. When a non-English
+core response is weak, Searchy adds one English core request. It does not run a
+second discovery request.
+
+## Normalization
+
+SearXNG `score`, `positions` and every confirming `engine` are preserved.
+Dimensions come from `width` and `height`, with `resolution` as fallback.
+
+Image results prefer a reliable HTTPS thumbnail. Trusted origin CDNs may use the
+higher-resolution original. Video cards require an HTTPS cover and page URL.
+Candidate URLs are checked in order, protocol-relative URLs become HTTPS, and
+plain HTTP is upgraded only for an explicit Bilibili/CDN allowlist. The final
+strict HTTPS validation remains mandatory because one malformed URL can make
+Telegram reject the complete inline answer.
+
+## Ranking
+
+Duplicates are merged by stable URL hash. The ranking score is:
+
+- 55% normalized SearXNG score or reciprocal-rank fusion, whichever is higher;
+- 25% query-token coverage in the title, with a small ordered-phrase boost;
+- 15% consensus across up to three engines;
+- 5% media dimensions and quality.
+
+Equal scores retain SearXNG order and then use the stable result ID. Mixed search
+keeps a 50/50 image/video balance while results exist in both categories. The
+discovery target is 30%, rising to 50% for a weak core category. Weakly matching
+discovery items are moved below the first page instead of displacing relevant
+core results. In the first ten, each host is capped at two. The cap relaxes one
+result at a time when the only alternative would replace a strongly matching
+video with unrelated cross-host noise. Later results use a 40% host cap that is
+also relaxed only when needed.
+
+A core category is weak when it has fewer than ten unique results, fewer than
+three relevant titles in its top ten, more than 60% of its top ten from one host,
+or fewer than twenty results alongside degraded engines.
+
+## Cache, failures and privacy
+
+The LRU key contains normalized query, categories, page and language.
+`singleflight` collapses identical concurrent work. Transport failures are never
+cached. If one primary pool fails, the other can still answer; two failures
+produce the existing empty result behavior.
+
+Logs contain pool, locale, timing, raw/usable counts and degraded-engine state,
+but never query text. Analytics remain unchanged: counts, timings, category,
+result type and the primary engine only. No title, URL or query is persisted.
+
+## Synthetic benchmark
+
+`cmd/searchbench` compares the `v0.1.0` engine interleave with the candidate on
+12 exact, 12 rare or meme-oriented, and 12 multilingual synthetic queries. It
+reads no production history and writes no files; JSON is emitted to stdout.
+
+```sh
+go run ./cmd/searchbench \
+  -url http://localhost:8080 \
+  -mode compare \
+  -summary-only
 ```
 
-Key choices baked into the client:
-
-- **Pinned engines, not categories.** The bot sends a small `engines=` set and
-  deliberately omits `categories`. `categories` is *additive* in SearXNG: it runs
-  every enabled engine for the category regardless of `engines`, firing ~15
-  engines at once and overloading a private instance's network layer (engines
-  then fail with proxy errors). Restricting to a few named engines keeps queries
-  fast and reliable. If no pinned engine is configured for the requested media
-  categories, the client rejects the request before contacting SearXNG.
-- **Engine sets are configurable** via `ENGINES_IMAGES` and `ENGINES_VIDEOS`
-  (comma-separated). Runtime defaults always provide a pinned set for both
-  categories; production requests must never fall back to `categories`.
-- **Pagination.** `pageno` is 1-based (the bot's 0-based page + 1). SearXNG does
-  not report total pages reliably, so the provider reports "another page may
-  exist" whenever the current page returned any raw results; the caller caps the
-  page count.
-- **Safe search** maps `SAFE_SEARCH` (0/1/2) to SearXNG's `safesearch`.
-- **Language.** `LANGUAGE` sets SearXNG's `language`; `all` (the default) applies
-  no language bias.
-- **A browser-like User-Agent** reduces the chance of SearXNG's bot detection
-  rejecting the request even on a private instance.
-
-## Result Normalization
-
-SearXNG emits an engine-dependent union of fields; every field is optional. The
-provider normalizes each result into a flat `search.MediaResult`, keyed on a
-short hash of the source URL (used as the stable Telegram inline result id).
-
-### Images (`template: images.html`)
-
-- Telegram fetches the photo URL server-side to send it, so it must be a
-  reachable JPEG (≤ 5 MB). Origin `img_src` often fails this (hotlink 403, or
-  huge — e.g. Wikimedia originals), so the provider uses the CDN `thumbnail_src`
-  as the photo for most engines, keeping the higher-res origin only for engines
-  with their own reliable CDN (`unsplash`, `flickr`).
-- A result with no valid photo URL is dropped.
-
-### Videos (`template: videos.html`)
-
-- Rendered as a cover card, so the provider only needs a usable cover
-  (`thumbnail` / `thumbnail_src`) and a page link (`url` / `iframe_src`). This
-  deliberately accepts videos from **any** platform, not just those exposing an
-  embeddable iframe.
-- Duration is parsed from SearXNG's `length` field, which may be a number of
-  seconds or a `M:SS` / `H:MM:SS` string.
-- A result with no valid cover or page URL is dropped.
-
-### Strict URL validation
-
-Every inline media and button URL is validated as strict HTTPS (real host, no
-control/unsafe characters, sane length) before use. Telegram rejects the **entire**
-`answerInlineQuery` if even one result carries a malformed URL, so invalid results
-are filtered out rather than risked.
-
-## Aggregation
-
-The `Aggregator` (`internal/search/aggregate.go`) sits between the bot and the
-provider:
-
-- **Cache.** An in-process LRU with TTL (`CACHE_SIZE` / `CACHE_TTL`) keyed on the
-  normalized query, categories, and page. A hit returns instantly. Failures are
-  not cached, so the next attempt retries.
-- **De-duplication.** `singleflight` collapses identical concurrent searches into
-  one backend call and hands the result to every waiter. The shared call is
-  detached from any single caller's context, so an inline debounce cancel can't
-  give an unrelated waiter a spurious empty result.
-- **Post-processing.** Results are de-duplicated by id, then interleaved
-  round-robin across engines so a single high-volume engine (e.g. bing/ddg, which
-  flood junk for some queries) can't bury higher-quality curated results, and
-  finally capped at `MAX_RESULTS`.
-
-## Privacy and Logging
-
-The query text is never logged. Degraded/unresponsive engines are surfaced in
-logs (how a flaky or blocked engine is spotted) with counts only, never the
-query. A cancelled request (the inline debouncer dropping a superseded query) is
-treated as expected, not an error.
+The report separates exact, rare and multilingual groups and includes keyword
+relevance@10, discovery count@20, host diversity, usable HTTPS ratio, empty
+count, p95 and maximum latency. Run without `-summary-only` to manually inspect
+the top-ten titles before a release.

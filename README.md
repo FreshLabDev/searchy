@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/FreshLabDev/searchy/releases"><img src="https://img.shields.io/github/v/release/FreshLabDev/searchy?include_prereleases&sort=semver&style=for-the-badge&label=latest&labelColor=0f172a&color=4c8c4a" alt="latest version"></a>
-  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.1.0-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
+  <a href="docs/versioning.md"><img src="https://img.shields.io/badge/version-v0.2.0--alpha.1-4c8c4a?style=for-the-badge&labelColor=0f172a" alt="current version"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/FreshLabDev/searchy?style=for-the-badge&logo=go&logoColor=white&label=go&labelColor=0f172a&color=00ADD8" alt="go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-334155?style=for-the-badge&labelColor=0f172a" alt="license"></a>
 </p>
@@ -47,6 +47,7 @@ Searchy keeps the MVP deliberately narrow:
 | Channel | Version | Meaning |
 |:--|:--|:--|
 | Stable | `v0.1.0` | Private image and video search with personal Vido delivery |
+| Alpha | `v0.2.0-alpha.1` | Relevance ranking, long-tail discovery and per-user search language |
 | Next | `Unreleased` | Compatible fixes and MVP improvements land on `dev` |
 
 Searchy's inline, DM, group, and Vido delivery flows are live-tested against
@@ -173,15 +174,19 @@ only `BOT_TOKEN` set.
 | `BOT_TOKEN` | yes | - | Telegram bot token from BotFather (inline mode must be enabled) |
 | `SEARXNG_URL` | no | `http://localhost:8080` | SearXNG base URL (compose overrides to `http://searxng:8080`) |
 | `SEARXNG_SECRET` | compose | - | Secret for the bundled SearXNG service |
-| `SEARXNG_TAG` | no | `latest` | SearXNG image tag (pin a dated tag) |
-| `ENGINES_IMAGES` | no | `bing images,duckduckgo images,unsplash,wikicommons.images` | Pinned image engines |
-| `ENGINES_VIDEOS` | no | `youtube,dailymotion,duckduckgo videos` | Pinned video engines |
+| `SEARXNG_IMAGE` | no | pinned `2026.6.24` digest | Proven immutable SearXNG image; override only after engine smoke |
+| `ENGINES_IMAGES` | no | Bing, DuckDuckGo | Pinned core image engines |
+| `ENGINES_VIDEOS` | no | YouTube, DuckDuckGo, Dailymotion, Bing Videos | Pinned core video engines |
+| `ENGINES_IMAGES_DISCOVERY` | no | FindThatMeme, Pinterest, Giphy, Frinkiac, Wikimedia | Pinned long-tail image engines |
+| `ENGINES_VIDEOS_DISCOVERY` | no | Bilibili, SepiaSearch, PeerTube | Pinned long-tail video engines |
 | `SAFE_SEARCH` | no | `0` | `0` off / `1` moderate / `2` strict |
 | `IMAGE_PROXY` | no | `false` | Route media URLs through SearXNG's proxy (keep off unless SearXNG is public HTTPS) |
-| `LANGUAGE` | no | `all` | SearXNG search language; `all` = neutral (no filter) |
-| `REQUEST_TIMEOUT` | no | `5s` | Per backend call; partial results on timeout (Go duration) |
+| `LANGUAGE` | no | empty | Optional operator override; empty uses the user's saved language |
+| `REQUEST_TIMEOUT` | no | `8s` | Overall core, discovery and optional English fallback budget |
 | `MAX_RESULTS` | no | `50` | Inline answer cap (Telegram hard limit is 50) |
 | `DEBOUNCE_DELAY` | no | `150ms` | Inline debounce per user |
+| `DISCOVERY_PERCENT` | no | `30` | Long-tail share for a healthy core result set |
+| `DISCOVERY_WEAK_PERCENT` | no | `50` | Long-tail share for a weak core result set |
 | `CACHE_TTL` | no | `5m` | In-process result cache TTL |
 | `CACHE_SIZE` | no | `2048` | In-process result cache entries |
 | `WORKERS` | no | `32` | Update worker pool size |
