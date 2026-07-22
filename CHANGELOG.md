@@ -35,6 +35,8 @@ Use this section for changes that are merged but not released yet.
 
 ### Privacy and operations
 
+- Upgrade `golang.org/x/text` to `v0.39.0` to fix reachable vulnerability
+  `GO-2026-5970` in Unicode normalization used through `pgxpool`.
 - Keep query text out of logs, analytics, grid sessions, and benchmark output;
   cache and singleflight isolation now also include the resolved language.
 - Add no database migration, proxy, Tor route, public SearXNG route, or new
