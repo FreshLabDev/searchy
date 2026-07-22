@@ -100,7 +100,7 @@ func main() {
 		EnginesImages:          "bing images,duckduckgo images",
 		EnginesVideos:          "youtube,duckduckgo videos,dailymotion,bing videos",
 		EnginesImagesDiscovery: "findthatmeme,pinterest,giphy,frinkiac,wikicommons.images",
-		EnginesVideosDiscovery: "bilibili,sepiasearch,peertube",
+		EnginesVideosDiscovery: "bilibili,peertube",
 	})
 	candidate := search.NewAggregator(candidateProvider, search.AggregatorOptions{
 		CacheSize: 128, CacheTTL: time.Minute, MaxResults: 50, Timeout: *timeout,

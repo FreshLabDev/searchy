@@ -30,6 +30,7 @@ v0.1.0-beta.3   About-panel version display fix
 v0.1.0-rc.1     joint Searchy × Vido candidate after the full delivery smoke
 v0.1.0          public MVP release
 v0.2.0-alpha.1  relevance, discovery pools and per-user search locale
+v0.2.0-alpha.2  dead-result and video cover-card hardening
 ```
 
 After the public MVP release:

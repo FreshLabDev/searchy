@@ -10,6 +10,18 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.0-alpha.2 - 2026-07-22
+
+### Fixed
+
+- Stop presenting a text-only video card when its cover can no longer be
+  fetched. Searchy now shows an explicit retry response and does not create a
+  Vido download intent for that unusable card.
+- Record a grid selection only after its media was sent successfully.
+- Remove SepiaSearch from the default discovery pool after a live result linked
+  to an unreachable PeerTube instance and timed out in Vido. Bilibili and
+  PeerTube remain as the two pinned discovery video engines.
+
 ## v0.2.0-alpha.1 - 2026-07-22
 
 ### Changed

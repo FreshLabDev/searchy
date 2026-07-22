@@ -225,6 +225,17 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 
 	switch r.Category {
 	case search.CatVideo:
+		data, ok := h.downloadImage(dctx, r.ThumbURL)
+		if !ok {
+			h.log.Warn("video cover unavailable",
+				"engine", r.Engine,
+				"pool", r.Pool,
+				"host", hostOf(r.ThumbURL),
+			)
+			h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))
+			return
+		}
+
 		token, mintErr := h.mintChatDownload(ctx, user, r, chatID)
 		download := downloadButton{}
 		if mintErr == nil {
@@ -233,22 +244,14 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 			h.log.Warn("vido card intent unavailable", "err", mintErr)
 		}
 		kb := videoButtons(r, lang, download)
-		var sent *models.Message
-		if data, ok := h.downloadImage(dctx, r.ThumbURL); ok {
-			var err error
-			sent, err = b.SendPhoto(ctx, &bot.SendPhotoParams{
-				ChatID: chatID, MessageThreadID: threadID, Photo: &models.InputFileUpload{Filename: "cover.jpg", Data: bytes.NewReader(data)},
-				Caption: videoCaption(r), ParseMode: models.ParseModeHTML, ReplyMarkup: kb,
-			})
-			if err != nil {
-				h.log.Warn("sendPhoto (pick video) failed", "err", err)
-			}
-		} else {
-			var err error
-			sent, err = b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, MessageThreadID: threadID, Text: videoCaption(r), ParseMode: models.ParseModeHTML, ReplyMarkup: kb})
-			if err != nil {
-				h.log.Warn("sendMessage (pick video) failed", "err", err)
-			}
+		sent, err := b.SendPhoto(ctx, &bot.SendPhotoParams{
+			ChatID: chatID, MessageThreadID: threadID, Photo: &models.InputFileUpload{Filename: "cover.jpg", Data: bytes.NewReader(data)},
+			Caption: videoCaption(r), ParseMode: models.ParseModeHTML, ReplyMarkup: kb,
+		})
+		if err != nil {
+			h.log.Warn("sendPhoto (pick video) failed", "err", err)
+			h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))
+			return
 		}
 		if token != "" && sent != nil {
 			if err := h.vido.BindIntentMessage(ctx, token, user.ID, chatID, sent.ID); err != nil {
@@ -267,6 +270,8 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 		if data, ok := h.downloadImage(dctx, coverURL(r)); ok {
 			if _, err := b.SendPhoto(ctx, &bot.SendPhotoParams{ChatID: chatID, MessageThreadID: threadID, Photo: &models.InputFileUpload{Filename: "image.jpg", Data: bytes.NewReader(data)}}); err != nil {
 				h.log.Warn("sendPhoto (pick image) failed", "err", err)
+				h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))
+				return
 			}
 		} else {
 			h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))

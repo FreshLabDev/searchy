@@ -10,7 +10,7 @@ COPY . .
 # Stamp build metadata into the binary (branchy-style) for logs, /healthz and
 # the /about screen. Defaults to the current product version; CI overrides
 # VERSION/COMMIT/DATE from the git tag.
-ARG VERSION=0.2.0-alpha.1
+ARG VERSION=0.2.0-alpha.2
 ARG COMMIT=none
 ARG DATE=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # distroless/static ships CA certs (needed for HTTPS to api.telegram.org) and
 # nothing else — tiny and no shell.
 FROM gcr.io/distroless/static-debian12:nonroot
-ARG VERSION=0.2.0-alpha.1
+ARG VERSION=0.2.0-alpha.2
 LABEL org.opencontainers.image.version=${VERSION}
 COPY --from=build /out/searchy /usr/local/bin/searchy
 

@@ -38,7 +38,7 @@ Each search starts two explicit requests in parallel:
 - Core images: Bing and DuckDuckGo.
 - Core videos: YouTube, DuckDuckGo Videos, Dailymotion and Bing Videos.
 - Discovery images: FindThatMeme, Pinterest, Giphy, Frinkiac and Wikimedia.
-- Discovery videos: Bilibili, SepiaSearch and PeerTube.
+- Discovery videos: Bilibili and PeerTube.
 
 Core lists use `ENGINES_IMAGES` and `ENGINES_VIDEOS`; discovery lists use
 `ENGINES_IMAGES_DISCOVERY` and `ENGINES_VIDEOS_DISCOVERY`. Missing pinned lists
