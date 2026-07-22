@@ -87,7 +87,7 @@ func (h *Handlers) runGridSearch(ctx context.Context, b *bot.Bot, chatID int64, 
 
 	sctx, cancel := context.WithTimeout(ctx, h.requestTimeout)
 	start := time.Now()
-	results, _ := h.agg.Search(sctx, q, cats, 0)
+	results, _ := h.agg.Search(sctx, q, cats, 0, search.SearchLanguage(lang))
 	cancel()
 	h.recordSearch(user, categoryStr(cats), len(results), int(time.Since(start).Milliseconds()), source)
 

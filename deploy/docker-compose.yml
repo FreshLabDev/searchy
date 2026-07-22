@@ -27,10 +27,8 @@ services:
       start_period: 2m30s
 
   searxng:
-    # STRONGLY pin a dated tag in .env (SEARXNG_TAG=2026.6.x-...). SearXNG ships
-    # frequent builds and engine scrapers/config break between them; :latest can
-    # silently change behaviour. Find current tags at hub.docker.com/r/searxng/searxng/tags
-    image: searxng/searxng:${SEARXNG_TAG:-latest}
+    # Keep the proven production digest: engine adapters change frequently.
+    image: ${SEARXNG_IMAGE:-searxng/searxng@sha256:77b6ec55d5176fc47cfe91df5e182393133305358741d0c80ebbeec75ac39f99}
     volumes:
       - ./searxng:/etc/searxng:rw
     environment:

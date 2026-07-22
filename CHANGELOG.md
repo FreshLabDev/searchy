@@ -10,6 +10,41 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.0-alpha.1 - 2026-07-22
+
+### Changed
+
+- Search the relevance-oriented core and long-tail discovery engine pools in
+  parallel, with a 30% discovery share that rises to 50% for weak core results.
+- Rank deduplicated media using SearXNG score, reciprocal rank, title coverage,
+  engine consensus, media quality, host diversity, and balanced image/video
+  scheduling.
+- Use each Searchy user's language for SearXNG and add one English core fallback
+  for weak non-English results. Operator-set `LANGUAGE` remains authoritative.
+- Keep the proven SearXNG `2026.6.24-e3126b89e` production digest after the
+  `2026.7.16-9f9c00819` candidate regressed DuckDuckGo Images under load. Pin an
+  eight-second request budget and explicit core and discovery engine defaults.
+
+### Fixed
+
+- Keep all contributing engines and positions during deduplication while
+  preserving the primary engine used by existing analytics.
+- Accept protocol-relative HTTPS media, upgrade known Bilibili HTTP hosts, and
+  select the first safe HTTPS candidate instead of the first non-empty URL.
+- Preserve valid width, height, and resolution metadata for quality ranking.
+
+### Privacy and operations
+
+- Keep query text out of logs, analytics, grid sessions, and benchmark output;
+  cache and singleflight isolation now also include the resolved language.
+- Add no database migration, proxy, Tor route, public SearXNG route, or new
+  secret. `SAFE_SEARCH=0`, `IMAGE_PROXY=false`, and direct egress remain.
+- Add a read-only 36-query synthetic benchmark covering exact, long-tail, and
+  multilingual searches. Against the live candidate it improved average
+  keyword relevance@10 by 18.6%, kept the exact-query group non-regressing,
+  returned no empty cases, kept usable HTTPS at 100%, and measured a 1.5-second
+  primary p95 even with one image core engine degraded.
+
 ## v0.1.0 - 2026-07-19
 
 First stable Searchy release: private image and video search for Telegram with

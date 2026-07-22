@@ -1,8 +1,12 @@
 package bot
 
 import (
+	"context"
 	"testing"
 
+	"github.com/go-telegram/bot/models"
+
+	"searchy/internal/i18n"
 	"searchy/internal/search"
 )
 
@@ -52,5 +56,24 @@ func TestFmtDuration(t *testing.T) {
 		if got := fmtDuration(in); got != want {
 			t.Errorf("fmtDuration(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestLangResolveCachesTelegramFallback(t *testing.T) {
+	h := &Handlers{}
+	u := &models.User{ID: 42, LanguageCode: "ru-RU"}
+
+	if got := h.langResolve(context.Background(), u); got != "ru" {
+		t.Fatalf("langResolve() = %q, want ru", got)
+	}
+	u.LanguageCode = "en"
+	if got := h.langResolve(context.Background(), u); got != "ru" {
+		t.Fatalf("cached langResolve() = %q, want ru", got)
+	}
+	if _, ok := h.langCache.Load(u.ID); !ok {
+		t.Fatal("Telegram fallback language was not cached")
+	}
+	if got := h.langResolve(context.Background(), nil); got != i18n.DefaultLang {
+		t.Fatalf("nil user langResolve() = %q, want %q", got, i18n.DefaultLang)
 	}
 }

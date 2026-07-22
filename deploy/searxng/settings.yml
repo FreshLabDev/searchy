@@ -11,17 +11,16 @@ use_default_settings: true
 general:
   instance_name: "searchy"
   debug: false
-  # Don't advertise as a public instance (also relaxes some bot heuristics).
-  public_instance: false
 
 server:
   # The official image's entrypoint replaces the literal "ultrasecretkey" with
   # the SEARXNG_SECRET env var at startup — keep this sentinel value here.
   secret_key: "ultrasecretkey"
   limiter: false
+  public_instance: false
   image_proxy: false
-  # GET makes ad-hoc API calls and caching simpler.
-  method: "GET"
+  # Searchy uses form-encoded POST so query text never appears in access URLs.
+  method: "POST"
 
 search:
   safe_search: 0          # show everything — no safe search
@@ -31,30 +30,30 @@ search:
   autocomplete: ""
 
 outgoing:
-  # Direct egress (Tor removed per user — back to fast ~0.8s). Language stays
-  # neutral via language=all in the bot's query. Tight per-engine budget so a
-  # single slow engine can't stall the first result (engines answer in 0.5-1.0s;
-  # caps the slow tail at ~2s).
+  # Direct egress with a tight per-engine budget. Searchy supplies the user's
+  # locale and adds one English core fallback only for weak localized results.
   request_timeout: 2.0
   max_request_timeout: 3.0
   pool_connections: 200
   pool_maxsize: 100
   enable_http2: false
 
-# Disable engines that constantly fail (crash the parser, 403, or rate-limit) so
-# they stop adding latency and log noise. Cross-platform video coverage stays
-# strong via the remaining engines: bing/google/duckduckgo videos (meta — index
-# YouTube, TikTok, Vimeo, news, etc.), youtube, dailymotion, sepiasearch (PeerTube).
+# Keep known-blocked adapters disabled. Explicit core/discovery pools are sent
+# by Searchy, so no broad category fan-out is used.
 engines:
   - name: brave.images
     disabled: true
   - name: brave.videos
     disabled: true
-  - name: google images
-    disabled: true
   - name: vimeo
-    disabled: true
-  - name: wikicommons.images
     disabled: true
   - name: wikicommons.videos
     disabled: true
+  - name: google cse images
+    disabled: true
+  - name: startpage images
+    disabled: true
+  - name: giphy
+    disabled: false
+  - name: wikicommons.images
+    disabled: false

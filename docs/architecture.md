@@ -24,7 +24,7 @@ shared functions and bridge API granted to `searchy_core`.
   timeouts).
 - `internal/search`: the media-search domain model (`MediaResult`), the
   `Provider` interface, and the `Aggregator` (LRU+TTL cache, `singleflight`
-  de-duplication, round-robin engine interleave, result cap).
+  de-duplication, relevance ranking, discovery quotas and result cap).
 - `internal/search/searxng`: the SearXNG JSON provider for the images and videos
   categories, including field normalization and the engine-pinning logic.
 - `internal/collage`: composes a page of covers into one numbered grid JPEG for
@@ -50,11 +50,13 @@ shared functions and bridge API granted to `searchy_core`.
 1. A user types `@bot query` in any chat; Telegram delivers an `inline_query`.
 2. The handler debounces per user, cancelling a superseded query so only the
    latest keystroke reaches the backend.
-3. The `Aggregator` serves a cache hit instantly, or collapses concurrent
-   identical searches into one SearXNG call with `singleflight`.
-4. The SearXNG provider issues one JSON request with a pinned engine set,
-   normalizes results, and reports whether another page likely exists.
-5. Results are mapped to `InlineQueryResultPhoto` cards (images, and video covers
+3. The `Aggregator` serves a locale-specific cache hit instantly, or collapses
+   concurrent identical searches with `singleflight`.
+4. Core and discovery engine pools run in parallel with explicit pinned engine
+   sets. A weak localized response may add one English core fallback.
+5. Results are de-duplicated, scored by SearXNG rank, consensus, title coverage
+   and media quality, then balanced by category, discovery share and host.
+6. Results are mapped to `InlineQueryResultPhoto` cards (images, and video covers
    with an "Open" button), capped at 50, and returned via `answerInlineQuery`
    with a `next_offset` page index and `cache_time`.
 

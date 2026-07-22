@@ -128,13 +128,15 @@ func (h *Handlers) onInline(ctx context.Context, b *bot.Bot, iq *models.InlineQu
 	if iq.From == nil { // malformed update — From is required for debounce/analytics
 		return
 	}
-	lang := h.langCached(iq.From) // fast path: no DB on every keystroke
 	raw := strings.TrimSpace(iq.Query)
-
 	if raw == "" {
+		lang := h.langCached(iq.From)
 		h.answer(ctx, b, iq.ID, promptResult(lang, h.botUsername), "", 5)
 		return
 	}
+	// Resolve core once on a cold cache so a manual language choice also affects
+	// inline search after restart. Subsequent keystrokes stay on the fast cache.
+	lang := h.langResolve(ctx, iq.From)
 
 	dctx, dcancel, ok := h.deb.gate(ctx, iq.From.ID)
 	defer dcancel()
@@ -152,7 +154,7 @@ func (h *Handlers) onInline(ctx context.Context, b *bot.Bot, iq *models.InlineQu
 	sctx, cancel := context.WithTimeout(dctx, h.requestTimeout)
 	defer cancel()
 	start := time.Now()
-	results, hasMore := h.agg.Search(sctx, q, cats, page)
+	results, hasMore := h.agg.Search(sctx, q, cats, page, search.SearchLanguage(lang))
 	if dctx.Err() != nil {
 		return // superseded by a newer query
 	}
@@ -443,7 +445,9 @@ func (h *Handlers) langResolve(ctx context.Context, u *models.User) string {
 	if l, ok := h.coreUserLang(ctx, u); ok {
 		return l
 	}
-	return i18n.Resolve(u.LanguageCode)
+	l := i18n.Resolve(u.LanguageCode)
+	h.langCache.Store(u.ID, l)
+	return l
 }
 
 // onStart resolves the user's language, auto-detecting from the Telegram hint on
