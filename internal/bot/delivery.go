@@ -179,7 +179,13 @@ func (h *Handlers) deliverPlan(ctx context.Context, b *bot.Bot, workerID string,
 			return
 		}
 	}
-	if err := h.vido.FinishDelivery(ctx, workerID, delivery.JobID); err != nil {
+	if err := retryBridgeCommit(
+		ctx,
+		[]time.Duration{time.Second, 2 * time.Second},
+		func(finishCtx context.Context) error {
+			return h.vido.FinishDelivery(finishCtx, workerID, delivery.JobID)
+		},
+	); err != nil {
 		h.log.Warn("finish vido delivery failed", "job_id", delivery.JobID, "err", err)
 	}
 }
@@ -204,23 +210,39 @@ func (h *Handlers) renewDeliveryLease(ctx context.Context, workerID string, jobI
 }
 
 func (h *Handlers) ackOperationWithRetry(ctx context.Context, workerID string, jobID int64, op vidobridge.Operation, messageID int, refs []vidobridge.FileRef) error {
+	return retryBridgeCommit(
+		ctx,
+		[]time.Duration{time.Second, 2 * time.Second},
+		func(ackCtx context.Context) error {
+			return h.vido.AckOperation(
+				ackCtx, workerID, jobID, op, messageID, refs,
+			)
+		},
+	)
+}
+
+func retryBridgeCommit(
+	ctx context.Context,
+	retryDelays []time.Duration,
+	commit func(context.Context) error,
+) error {
 	var last error
-	for attempt := 0; attempt < 3; attempt++ {
-		ackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		last = h.vido.AckOperation(ackCtx, workerID, jobID, op, messageID, refs)
+	for attempt := 0; ; attempt++ {
+		commitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		last = commit(commitCtx)
 		cancel()
 		if last == nil {
 			return nil
 		}
-		if attempt < 2 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Duration(attempt+1) * time.Second):
-			}
+		if attempt >= len(retryDelays) {
+			return last
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryDelays[attempt]):
 		}
 	}
-	return last
 }
 
 func (h *Handlers) sendOperation(ctx context.Context, b *bot.Bot, delivery *vidobridge.Delivery, op vidobridge.Operation) ([]*models.Message, error) {
