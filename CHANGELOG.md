@@ -10,6 +10,18 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.0-alpha.3 - 2026-08-09
+
+### Fixed
+
+- Retry the final Vido bridge commit after Telegram operations were confirmed,
+  preventing transient Core errors from leaving delivered media leased.
+
+### Operations
+
+- Requires Core `v0.2.0-alpha.1` migration 008 and Vido
+  `v2.3.7-alpha.5` before bridge intake resumes.
+
 ## v0.2.0-alpha.2 - 2026-07-22
 
 ### Fixed

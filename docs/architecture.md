@@ -154,7 +154,9 @@ process dies after Telegram may have accepted the media, lease recovery marks
 the delivery unknown and offers only the card owner an explicit retry warning
 about a possible duplicate. Failed downloads are delivered through a durable
 notification outbox using Vido's structured `user_message_key`, so a Searchy
-restart does not lose the specific error.
+restart does not lose the specific error. Searchy retries both the operation ACK
+and the final bridge commit on short Core failures without resending Telegram
+media.
 
 The bridge pool is initialized without requiring core-postgres to be reachable
 at that exact startup instant. pgx reconnects lazily; health stays `degraded`
