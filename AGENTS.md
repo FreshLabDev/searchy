@@ -3,6 +3,10 @@
 This file is for coding agents working on Searchy. Keep the project minimal,
 private by design, and production-minded.
 
+- Telegram startup -- getMe, deleteWebhook, the readiness wait and the
+  capability preflight -- goes through `github.com/FreshLabDev/tg`. Polling and
+  handlers stay on `go-telegram/bot`. Do not add a private HTTP client back.
+
 ## Project Shape
 
 - Searchy is one Go service (module `searchy`).

@@ -99,6 +99,14 @@ func Load() (*Config, error) {
 	if c.BotToken == "" {
 		return nil, fmt.Errorf("BOT_TOKEN is required")
 	}
+	// A malformed base URL used to be caught while building each request; the
+	// shared client takes it as given, so it is checked once, here, where the
+	// message can name the variable.
+	if c.TelegramBotAPIBaseURL != "" {
+		if !strings.HasPrefix(c.TelegramBotAPIBaseURL, "http://") && !strings.HasPrefix(c.TelegramBotAPIBaseURL, "https://") {
+			return nil, fmt.Errorf("TELEGRAM_BOT_API_BASE_URL must be an http or https URL")
+		}
+	}
 	if c.MaxResults > 50 {
 		c.MaxResults = 50 // Telegram hard limit for answerInlineQuery
 	}

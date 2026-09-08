@@ -60,3 +60,24 @@ func TestWeakDiscoveryShareNeverFallsBelowHealthyShare(t *testing.T) {
 		t.Errorf("weak discovery percentage = %d, want 80", config.DiscoveryWeakPercent)
 	}
 }
+
+// The base URL used to be validated while building every request. The shared
+// client takes it as given, so a typo has to be caught at startup instead of
+// turning into a connection error on the first poll.
+func TestLoadRejectsAMalformedBotAPIBaseURL(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "tok")
+	t.Setenv("TELEGRAM_BOT_API_BASE_URL", "telegram-bot-api:8081")
+	if _, err := Load(); err == nil {
+		t.Fatal("want an error naming TELEGRAM_BOT_API_BASE_URL")
+	}
+
+	t.Setenv("TELEGRAM_BOT_API_BASE_URL", "http://telegram-bot-api-next:8081")
+	if _, err := Load(); err != nil {
+		t.Fatalf("a valid base URL must be accepted: %v", err)
+	}
+
+	t.Setenv("TELEGRAM_BOT_API_BASE_URL", "")
+	if _, err := Load(); err != nil {
+		t.Fatalf("an empty base URL means Telegram's own endpoint: %v", err)
+	}
+}
