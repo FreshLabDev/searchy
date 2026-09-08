@@ -8,20 +8,18 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/FreshLabDev/tg"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
@@ -42,23 +40,6 @@ const (
 	telegramStartupInitialDelay = time.Second
 	telegramStartupMaxDelay     = 5 * time.Second
 )
-
-type telegramHTTPError struct {
-	operation  string
-	statusCode int
-}
-
-func (e *telegramHTTPError) Error() string {
-	return fmt.Sprintf("%s returned HTTP %d", e.operation, e.statusCode)
-}
-
-type telegramPermanentError struct {
-	message string
-}
-
-func (e *telegramPermanentError) Error() string {
-	return e.message
-}
 
 func main() {
 	healthcheck := flag.Bool("healthcheck", false, "probe the local /healthz endpoint and exit (for container healthchecks)")
@@ -186,32 +167,31 @@ func main() {
 	// webhook is set (a webhook + getUpdates would 409). GetMe is the token check:
 	// fail fast and loud rather than running on with an empty username (which would
 	// render "{bot}" prompts as a dangling "@" for the whole process life).
-	startupCtx, cancel := context.WithTimeout(ctx, telegramStartupTimeout)
-	me, err := telegramGetMeWithRetry(
-		startupCtx,
-		telegramClient,
-		cfg.TelegramBotAPIBaseURL,
-		cfg.BotToken,
-		telegramStartupInitialDelay,
-		telegramStartupMaxDelay,
-		func(attempt int, delay time.Duration, retryErr error) {
-			logger.Warn("Telegram Bot API not ready — retrying getMe",
-				"attempt", attempt, "retry_in", delay.String(), "err", retryErr)
-		},
+	api := tg.New(cfg.BotToken,
+		tg.WithAPIBase(cfg.TelegramBotAPIBaseURL),
+		tg.WithHTTPClient(telegramClient),
+		tg.WithLogger(logger),
 	)
+	startupCtx, cancel := context.WithTimeout(ctx, telegramStartupTimeout)
+	me, err := api.Preflight(startupCtx, tg.Needs{
+		// Searchy is an inline bot that answers with pictures. A server that
+		// cannot do either would leave it polling and never answering.
+		Methods: []string{"answerInlineQuery", "sendPhoto"},
+		Wait:    telegramStartupTimeout,
+	})
 	cancel()
 	if err != nil {
 		if ctx.Err() != nil {
 			logger.Info("startup cancelled")
 			return
 		}
-		logger.Error("getMe (check BOT_TOKEN / connectivity)", "err", err)
+		logger.Error("telegram preflight (check BOT_TOKEN / connectivity / server version)", "err", err)
 		os.Exit(1)
 	}
 	handlers.SetBotUsername(me.Username)
-	logger.Info("authorized", "username", me.Username, "id", me.ID)
+	logger.Info("authorized", "username", me.Username, "id", me.ID, "bot_api", tg.BotAPI)
 	webhookCtx, webhookCancel := context.WithTimeout(ctx, 10*time.Second)
-	if err := telegramDeleteWebhook(webhookCtx, telegramClient, cfg.TelegramBotAPIBaseURL, cfg.BotToken); err != nil {
+	if err := api.DeleteWebhook(webhookCtx); err != nil {
 		logger.Warn("deleteWebhook", "err", err)
 	}
 	webhookCancel()
@@ -233,142 +213,6 @@ func main() {
 		"searxng", cfg.SearxngURL, "workers", cfg.Workers, "cache_ttl", cfg.CacheTTL.String())
 	b.Start(ctx) // blocks until ctx is cancelled (SIGINT/SIGTERM)
 	logger.Info("shutdown complete")
-}
-
-func telegramGetMe(ctx context.Context, client *http.Client, serverURL, token string) (*models.User, error) {
-	endpoint, err := telegramAPIEndpoint(serverURL, token, "getMe")
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, &telegramPermanentError{message: "build getMe request"}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		// Do not return the URL: it contains the bot token.
-		return nil, fmt.Errorf("perform getMe request: %T", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, &telegramHTTPError{operation: "getMe", statusCode: resp.StatusCode}
-	}
-	var envelope struct {
-		OK          bool        `json:"ok"`
-		Result      models.User `json:"result"`
-		Description string      `json:"description"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&envelope); err != nil {
-		return nil, fmt.Errorf("decode getMe response: %w", err)
-	}
-	if !envelope.OK {
-		return nil, &telegramPermanentError{message: "getMe rejected the request"}
-	}
-	return &envelope.Result, nil
-}
-
-func telegramGetMeWithRetry(
-	ctx context.Context,
-	client *http.Client,
-	serverURL, token string,
-	initialDelay, maxDelay time.Duration,
-	onRetry func(attempt int, delay time.Duration, err error),
-) (*models.User, error) {
-	delay := initialDelay
-	if delay <= 0 {
-		delay = time.Second
-	}
-	if maxDelay < delay {
-		maxDelay = delay
-	}
-
-	for attempt := 1; ; attempt++ {
-		me, err := telegramGetMe(ctx, client, serverURL, token)
-		if err == nil {
-			return me, nil
-		}
-		if !isRetryableTelegramStartupError(err) {
-			return nil, err
-		}
-		if onRetry != nil {
-			onRetry(attempt, delay, err)
-		}
-
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil, fmt.Errorf("wait for getMe: %w", ctx.Err())
-		case <-timer.C:
-		}
-		if delay < maxDelay {
-			delay *= 2
-			if delay > maxDelay {
-				delay = maxDelay
-			}
-		}
-	}
-}
-
-func isRetryableTelegramStartupError(err error) bool {
-	var statusErr *telegramHTTPError
-	if errors.As(err, &statusErr) {
-		return statusErr.statusCode == http.StatusRequestTimeout ||
-			statusErr.statusCode == http.StatusTooManyRequests ||
-			statusErr.statusCode >= http.StatusInternalServerError
-	}
-	var permanentErr *telegramPermanentError
-	return !errors.As(err, &permanentErr)
-}
-
-func telegramDeleteWebhook(ctx context.Context, client *http.Client, serverURL, token string) error {
-	endpoint, err := telegramAPIEndpoint(serverURL, token, "deleteWebhook")
-	if err != nil {
-		return errors.New("build deleteWebhook request")
-	}
-	endpoint += "?drop_pending_updates=false"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return errors.New("build deleteWebhook request")
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("perform deleteWebhook request: %T", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("deleteWebhook returned HTTP %d", resp.StatusCode)
-	}
-	var envelope struct {
-		OK          bool   `json:"ok"`
-		Result      bool   `json:"result"`
-		Description string `json:"description"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&envelope); err != nil {
-		return fmt.Errorf("decode deleteWebhook response: %w", err)
-	}
-	if !envelope.OK || !envelope.Result {
-		return fmt.Errorf("deleteWebhook rejected: %s", envelope.Description)
-	}
-	return nil
-}
-
-func telegramAPIEndpoint(serverURL, token, method string) (string, error) {
-	if serverURL == "" {
-		serverURL = "https://api.telegram.org"
-	}
-	base, err := url.Parse(serverURL)
-	if err != nil ||
-		(base.Scheme != "http" && base.Scheme != "https") ||
-		base.Hostname() == "" ||
-		base.User != nil ||
-		base.RawQuery != "" ||
-		base.Fragment != "" {
-		return "", &telegramPermanentError{message: "invalid Telegram Bot API base URL"}
-	}
-	return strings.TrimRight(serverURL, "/") + "/bot" + token + "/" + method, nil
 }
 
 // registerCommands publishes a minimal command list: private chats see only

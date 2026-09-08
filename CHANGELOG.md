@@ -10,6 +10,36 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.0-alpha.4 - 2026-09-08
+
+### Changed
+
+- Startup goes through `github.com/FreshLabDev/tg`, the client shared by the
+  bot family. Searchy keeps `go-telegram/bot` for polling and handlers, but
+  the 170 lines of hand-rolled HTTP around it -- getMe with its own retry
+  ladder, deleteWebhook, endpoint building and two error types -- are gone,
+  along with the knowledge that had been living only in this repository.
+- `go-telegram/bot` moves from v1.21.0 to v1.25.0, which is the release that
+  covers Bot API 10.3.
+- `TELEGRAM_BOT_API_BASE_URL` is validated at startup. It used to be checked
+  while building every request; the shared client takes it as given, so a typo
+  now fails with a message naming the variable instead of a connection error on
+  the first poll.
+
+### Added
+
+- A startup preflight naming `answerInlineQuery` and `sendPhoto`. Searchy is
+  an inline bot that answers with pictures, and a Bot API server without those
+  would leave it polling and never answering.
+
+### Security
+
+- `golang.org/x/image` moves to v0.45.0. The advisory against v0.43.0 is
+  reachable straight from `collage.Render` through the WebP decoder, and every
+  image searchy decodes comes from a search result -- that is, from the
+  internet.
+- The Go floor moves to 1.26.6, build image included.
+
 ## v0.2.0-alpha.3 - 2026-08-09
 
 ### Fixed
