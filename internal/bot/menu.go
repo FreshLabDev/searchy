@@ -69,11 +69,40 @@ func curMark(active bool) string {
 	return ""
 }
 
-// homePanel — the /start landing panel.
-func homePanel(lang, botUsername, vidoBotUsername string, owner int64) (string, *tg.InlineKeyboardMarkup) {
-	text := i18n.T(lang, "home.title") + "\n\n" +
-		i18n.T(lang, "home.tagline") + "\n\n" +
-		i18n.T(lang, "home.hint", "bot", botUsername)
+// navRow is the row every subordinate panel ends with.
+//
+// Close only exists in a group. In a DM the conversation *is* the panel:
+// there is nothing else in the chat and nothing to close, so the button
+// offers to delete the only thing on screen. In a group the panel is one
+// person's menu sitting in everyone else's feed, and leaving it there is the
+// rude default — so there the button is not optional.
+func navRow(lang string, owner int64, inGroup bool) []tg.InlineKeyboardButton {
+	row := []tg.InlineKeyboardButton{
+		{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")},
+	}
+	if inGroup {
+		row = append(row, tg.InlineKeyboardButton{
+			Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close"),
+		})
+	}
+	return row
+}
+
+// homePanel — the /start landing panel. A DM and a group get different
+// screens, the way vido splits its personal and group section builders: a DM
+// is the user's own space, so language and personal statistics live there and
+// there is nothing to close; a group is shared, so the panel offers searching,
+// help and a way out, and sends the personal settings to a DM.
+func homePanel(lang, botUsername, vidoBotUsername string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
+	if inGroup {
+		return groupHome(lang, botUsername, owner)
+	}
+	return personalHome(lang, botUsername, vidoBotUsername, owner)
+}
+
+func personalHome(lang, botUsername, vidoBotUsername string, owner int64) (string, *tg.InlineKeyboardMarkup) {
+	text := header(lang, "home.title", "home.tagline") + "\n\n" +
+		blockquote(i18n.T(lang, "home.hint", "bot", botUsername))
 	rows := [][]tg.InlineKeyboardButton{
 		{
 			{Text: i18n.T(lang, "btn.language"), CallbackData: cb(owner, "language")},
@@ -90,13 +119,38 @@ func homePanel(lang, botUsername, vidoBotUsername string, owner int64) (string, 
 			URL:  "https://t.me/" + vidoBotUsername + "?start=settings",
 		}})
 	}
-	rows = append(rows, []tg.InlineKeyboardButton{{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")}})
-	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
-	return text, kb
+	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func groupHome(lang, botUsername string, owner int64) (string, *tg.InlineKeyboardMarkup) {
+	text := header(lang, "home.title", "home.tagline") + "\n\n" +
+		blockquote(i18n.T(lang, "home.hint.group", "bot", botUsername))
+	rows := [][]tg.InlineKeyboardButton{
+		// Inline search is the one surface that works for everyone in the
+		// group at once, so it leads.
+		{{Text: i18n.T(lang, "btn.search"), SwitchInlineQueryCurrentChat: strptr("")}},
+		{
+			{Text: i18n.T(lang, "btn.help"), CallbackData: cb(owner, "help")},
+			{Text: i18n.T(lang, "btn.about"), CallbackData: cb(owner, "about")},
+		},
+	}
+	if botUsername != "" {
+		// Language and personal statistics are personal, so the group panel
+		// points at the DM rather than putting one member's settings in
+		// everyone's feed.
+		rows = append(rows, []tg.InlineKeyboardButton{{
+			Text: i18n.T(lang, "btn.open_dm"),
+			URL:  "https://t.me/" + botUsername,
+		}})
+	}
+	rows = append(rows, []tg.InlineKeyboardButton{{
+		Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close"),
+	}})
+	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 // languagePanel — the language picker (2 per row), current one marked with ◉.
-func languagePanel(lang string, owner int64) (string, *tg.InlineKeyboardMarkup) {
+func languagePanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, "language.title", "language.hint")
 	opts := i18n.LANGUAGE_OPTIONS
 	var rows [][]tg.InlineKeyboardButton
@@ -111,12 +165,12 @@ func languagePanel(lang string, owner int64) (string, *tg.InlineKeyboardMarkup) 
 		}
 		rows = append(rows, row)
 	}
-	rows = append(rows, []tg.InlineKeyboardButton{{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")}})
+	rows = append(rows, navRow(lang, owner, inGroup))
 	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 // statsPanel — personal or global stats (vido formatting). No query text anywhere.
-func statsPanel(lang string, owner int64, st db.Stats, global bool, updated string) (string, *tg.InlineKeyboardMarkup) {
+func statsPanel(lang string, owner int64, st db.Stats, global bool, updated string, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	titleKey, subKey := "stats.title.personal", "stats.subtitle.personal"
 	if global {
 		titleKey, subKey = "stats.title.global", "stats.subtitle.global"
@@ -149,28 +203,53 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 			{Text: tabMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp")},
 			{Text: tabMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg")},
 		},
-		{
-			{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")},
-			{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")},
-		},
+		navRow(lang, owner, inGroup),
 	}}
 	return b.String(), kb
 }
 
-// infoPanel — a title + blockquote(body) screen (help, about) with Back/Close.
-func infoPanel(lang string, owner int64, titleKey, bodyKey string, bodyArgs ...string) (string, *tg.InlineKeyboardMarkup) {
+// infoPanel — a title + blockquote(body) screen (help) with Back, and Close
+// only where there is something to close.
+func infoPanel(lang string, owner int64, inGroup bool, titleKey, bodyKey string, bodyArgs ...string) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, titleKey, "") + "\n\n" + blockquote(i18n.T(lang, bodyKey, bodyArgs...))
 	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
-		{
-			{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")},
-			{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")},
-		},
+		navRow(lang, owner, inGroup),
 	}}
 	return text, kb
 }
 
-func aboutBody(lang string, owner int64) (string, *tg.InlineKeyboardMarkup) {
-	return infoPanel(lang, owner, "about.title", "about.body", "version", aboutVersion(buildinfo.Version), "date", buildinfo.Date)
+// aboutPanel is the family's About screen: name and version on one line, one
+// line of purpose, then a blockquote of "key · value" facts. The repository is
+// a link inside that text rather than a button of its own — two controls for
+// one action is one too many.
+func aboutPanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
+	var b strings.Builder
+	b.WriteString("<b>Searchy</b> · <i>v" + aboutVersion(buildinfo.Version) + "</i>\n")
+	b.WriteString(i18n.T(lang, "about.tagline"))
+	b.WriteString("\n\n")
+	b.WriteString(blockquote(
+		aboutField(lang, "about.field.search", i18n.T(lang, "about.value.search")),
+		aboutField(lang, "about.field.build", buildDate()),
+		aboutField(lang, "about.field.source", `<a href="https://github.com/FreshLabDev/searchy">FreshLabDev/searchy</a> · Apache-2.0`),
+		aboutField(lang, "about.field.admin", `<a href="https://t.me/amtiyo">@amtiyo</a>`),
+	))
+	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
+		navRow(lang, owner, inGroup),
+	}}
+	return b.String(), kb
+}
+
+func aboutField(lang, labelKey, value string) string {
+	return i18n.T(lang, labelKey) + " · " + value
+}
+
+// buildDate is the stamp CI puts in the binary. An unstamped local build says
+// "unknown", which is a fact worth showing rather than an empty line.
+func buildDate() string {
+	if date := strings.TrimSpace(buildinfo.Date); date != "" {
+		return escapeHTML(date)
+	}
+	return "unknown"
 }
 
 func aboutVersion(version string) string {

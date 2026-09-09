@@ -340,7 +340,7 @@ func coverURL(r search.MediaResult) string {
 // gridCaption is the vido-style header above the grid.
 func gridCaption(lang string, page, total int) string {
 	totalPages := (total + gridPageSize - 1) / gridPageSize
-	return "<b>🔎 " + i18n.T(lang, "grid.title") + "</b>\n<i>" +
+	return "<b>" + i18n.T(lang, "grid.title") + "</b>\n<i>" +
 		i18n.T(lang, "grid.hint", "page", strconv.Itoa(page+1), "total", strconv.Itoa(totalPages)) + "</i>"
 }
 

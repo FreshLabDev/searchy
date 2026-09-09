@@ -15,6 +15,33 @@ Use this section for changes that are merged but not released yet.
 
 ### Changed
 
+- **`/start` is a different screen in a group than in a DM.** A DM is the
+  user's own space, so it keeps language and personal statistics and has no
+  Close — there is nothing else in the chat, and the button offered to delete
+  the only thing on screen. A group is shared, so the panel there leads with
+  inline search, keeps Help and About, points at the DM for the personal
+  settings, and always offers Close: the panel is one member's menu sitting in
+  everyone else's feed. Help, About, Language and Statistics follow the same
+  rule — Close only where there is something to close.
+- **The About tab is the family's format.** Name and version on one line, one
+  line of purpose, then a blockquote of `key · value` facts: the search backend,
+  the build date, the repository as a link with its license, and the admin. The
+  repository is a link inside the text rather than a button of its own, because
+  two controls for one action is one too many. Everything is translated into all
+  16 languages, values included.
+- The build date is visible. `aboutBody` had been passing `buildinfo.Date` into
+  a string that referenced it in none of the 16 languages, so nothing told a CI
+  build from a laptop one.
+- **Emoji are gone from every button and heading**, in all 16 languages: About,
+  Help, Language, Statistics, Search, Download, Video download settings, Open
+  original, Open on {platform}, Retry sending, the `/start` greeting, the panel
+  headings and the results caption. They stay only where they mark state — the
+  selected language and the active statistics tab keep `◉ / ◎`. An icon on every
+  control is decoration that stops meaning anything, which is why the marks that
+  do mean something got lost in it.
+- Navigation reads `Back` and `Close`, without the `⬅` and `✖`.
+- `homePanel` is assembled the way every other panel is, through `header()` and
+  `blockquote()`, instead of concatenating three keys by hand.
 - **Searchy runs entirely on `github.com/FreshLabDev/tg`.**
   `github.com/go-telegram/bot` is gone: the poll loop, every send, the inline
   answers and the Vido delivery bridge all go through the family's own client.

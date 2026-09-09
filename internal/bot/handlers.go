@@ -251,6 +251,7 @@ func (h *Handlers) onCallback(ctx context.Context, cq *tg.CallbackQuery) {
 	}
 	chatID := cq.Message.Chat.ID
 	msgID := cq.Message.MessageID
+	inGroup := cq.Message.Chat.Type != tg.ChatPrivate
 	h.touchCore(&cq.From, &cq.Message.Chat)
 	lang := h.langResolve(ctx, &cq.From)
 
@@ -260,17 +261,17 @@ func (h *Handlers) onCallback(ctx context.Context, cq *tg.CallbackQuery) {
 		h.answerCB(ctx, cq.ID, "", false)
 		return
 	case action == "home":
-		text, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, owner)
+		text, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, owner, inGroup)
 		h.editPanel(ctx, chatID, msgID, text, kb)
 	case action == "language":
-		text, kb := languagePanel(lang, owner)
+		text, kb := languagePanel(lang, owner, inGroup)
 		h.editPanel(ctx, chatID, msgID, text, kb)
 	case strings.HasPrefix(action, "l|"):
 		code := action[2:]
 		if i18n.IsSupported(code) {
 			h.setLanguage(cq.From.ID, code, core.SourceManual)
 			lang = code
-			text, kb := languagePanel(lang, owner)
+			text, kb := languagePanel(lang, owner, inGroup)
 			h.editPanel(ctx, chatID, msgID, text, kb)
 			h.answerCB(ctx, cq.ID, i18n.T(lang, "language.updated", "language", i18n.LabelOf(code)), false)
 			return
@@ -278,13 +279,13 @@ func (h *Handlers) onCallback(ctx context.Context, cq *tg.CallbackQuery) {
 	case action == "statsp" || action == "statsg":
 		global := action == "statsg"
 		st, updated := h.statsView(ctx, cq.From.ID, global)
-		text, kb := statsPanel(lang, owner, st, global, updated)
+		text, kb := statsPanel(lang, owner, st, global, updated, inGroup)
 		h.editPanel(ctx, chatID, msgID, text, kb)
 	case action == "help":
-		text, kb := infoPanel(lang, owner, "help.title", "help.body", "bot", h.botUsername)
+		text, kb := infoPanel(lang, owner, inGroup, "help.title", "help.body", "bot", h.botUsername)
 		h.editPanel(ctx, chatID, msgID, text, kb)
 	case action == "about":
-		text, kb := aboutBody(lang, owner)
+		text, kb := aboutPanel(lang, owner, inGroup)
 		h.editPanel(ctx, chatID, msgID, text, kb)
 	}
 	h.answerCB(ctx, cq.ID, "", false)
@@ -318,6 +319,7 @@ func (h *Handlers) onMessage(ctx context.Context, msg *tg.Message) {
 	if text == "" {
 		return
 	}
+	inGroup := msg.Chat.Type != tg.ChatPrivate
 	h.touchCore(msg.From, &msg.Chat) // identity + presence for this bot/chat
 
 	if strings.HasPrefix(text, "/") {
@@ -328,7 +330,7 @@ func (h *Handlers) onMessage(ctx context.Context, msg *tg.Message) {
 		switch cmd {
 		case "start":
 			lang := h.onStart(ctx, msg.From)
-			t, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, msg.From.ID)
+			t, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, msg.From.ID, inGroup)
 			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		case "search":
 			// "/search <query>" runs a full grid search right here (the main way to
@@ -342,26 +344,26 @@ func (h *Handlers) onMessage(ctx context.Context, msg *tg.Message) {
 				return
 			}
 			source := "group"
-			if msg.Chat.Type == tg.ChatPrivate {
+			if !inGroup {
 				source = "dm"
 			}
 			h.runGridSearch(ctx, msg.Chat.ID, msg.MessageThreadID, msg.From, arg, source)
 		case "help":
 			lang := h.langResolve(ctx, msg.From)
-			t, kb := infoPanel(lang, msg.From.ID, "help.title", "help.body", "bot", h.botUsername)
+			t, kb := infoPanel(lang, msg.From.ID, inGroup, "help.title", "help.body", "bot", h.botUsername)
 			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		case "stats":
 			lang := h.langResolve(ctx, msg.From)
 			st, updated := h.statsView(ctx, msg.From.ID, false)
-			t, kb := statsPanel(lang, msg.From.ID, st, false, updated)
+			t, kb := statsPanel(lang, msg.From.ID, st, false, updated, inGroup)
 			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		case "about":
 			lang := h.langResolve(ctx, msg.From)
-			t, kb := aboutBody(lang, msg.From.ID)
+			t, kb := aboutPanel(lang, msg.From.ID, inGroup)
 			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		default:
 			// Unknown command: nudge in private chats only (don't spam groups).
-			if msg.Chat.Type == tg.ChatPrivate {
+			if !inGroup {
 				lang := h.langResolve(ctx, msg.From)
 				h.reply(ctx, msg.Chat.ID, i18n.T(lang, "cmd.unknown"))
 			}
@@ -371,7 +373,7 @@ func (h *Handlers) onMessage(ctx context.Context, msg *tg.Message) {
 
 	// Plain text triggers a search only in private chats; in groups, searching is
 	// explicit via /search to avoid reacting to every message.
-	if msg.Chat.Type != tg.ChatPrivate {
+	if inGroup {
 		return
 	}
 	h.runGridSearch(ctx, msg.Chat.ID, msg.MessageThreadID, msg.From, text, "dm")
