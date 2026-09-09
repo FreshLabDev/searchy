@@ -377,7 +377,7 @@ func gridKeyboard(lang, tok string, page, total int) *tg.InlineKeyboardMarkup {
 	if len(nav) > 0 {
 		rows = append(rows, nav)
 	}
-	rows = append(rows, []tg.InlineKeyboardButton{{Text: i18n.T(lang, "action.close"), CallbackData: gcb(tok, "x", 0)}})
+	rows = append(rows, []tg.InlineKeyboardButton{closeButton(lang, gcb(tok, "x", 0))})
 	return &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 

@@ -73,6 +73,17 @@ func stateMark(active bool) string {
 	return markOff
 }
 
+// closeButton is the only place this bot writes Close. Every Close in the
+// codebase comes from here, so the word and the destructive colour cannot
+// drift apart again: Close dismisses the panel, and dismissal is Danger.
+func closeButton(lang, data string) tg.InlineKeyboardButton {
+	return tg.InlineKeyboardButton{
+		Text:         i18n.T(lang, "action.close"),
+		CallbackData: data,
+		Style:        tg.StyleDanger,
+	}
+}
+
 // navRow is the row every subordinate panel ends with.
 //
 // Close only exists in a group. In a DM the conversation *is* the panel:
@@ -85,9 +96,7 @@ func navRow(lang string, owner int64, inGroup bool) []tg.InlineKeyboardButton {
 		{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")},
 	}
 	if inGroup {
-		row = append(row, tg.InlineKeyboardButton{
-			Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close"),
-		})
+		row = append(row, closeButton(lang, cb(owner, "close")))
 	}
 	return row
 }
@@ -109,7 +118,9 @@ func personalHome(lang, botUsername, vidoBotUsername string, owner int64) (strin
 		blockquote(i18n.T(lang, "home.hint", "bot", botUsername))
 	rows := [][]tg.InlineKeyboardButton{
 		{
-			{Text: i18n.T(lang, "btn.language"), CallbackData: cb(owner, "language")},
+			// The one highlighted button on this screen: nothing else here is
+			// readable until the language is right.
+			{Text: i18n.T(lang, "btn.language"), CallbackData: cb(owner, "language"), Style: tg.StylePrimary},
 			{Text: i18n.T(lang, "btn.stats"), CallbackData: cb(owner, "statsp")},
 		},
 		{
@@ -147,31 +158,42 @@ func groupHome(lang, botUsername string, owner int64) (string, *tg.InlineKeyboar
 			URL:  "https://t.me/" + botUsername,
 		}})
 	}
-	rows = append(rows, []tg.InlineKeyboardButton{{
-		Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close"),
-	}})
+	// Home has nothing above it, so it ends with Close alone rather than with
+	// navRow, whose "Back" would point at the screen you are already on. The
+	// Close itself is the shared one, so it cannot drift from the others.
+	rows = append(rows, []tg.InlineKeyboardButton{closeButton(lang, cb(owner, "close"))})
 	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-// languagePanel — the language picker (2 per row), every option marked so the
-// column has one left edge.
+// languagePanel — the language picker (2 per row), every option marked, the
+// current one green.
 func languagePanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, "language.title", "language.hint")
 	opts := i18n.LANGUAGE_OPTIONS
-	var rows [][]tg.InlineKeyboardButton
+	rows := make([][]tg.InlineKeyboardButton, 0, (len(opts)+1)/2+1)
 	for i := 0; i < len(opts); i += 2 {
-		row := []tg.InlineKeyboardButton{
-			{Text: stateMark(opts[i].Code == lang) + opts[i].Label, CallbackData: cb(owner, "l|"+opts[i].Code)},
-		}
+		row := []tg.InlineKeyboardButton{languageButton(opts[i], lang, owner)}
 		if i+1 < len(opts) {
-			row = append(row, tg.InlineKeyboardButton{
-				Text: stateMark(opts[i+1].Code == lang) + opts[i+1].Label, CallbackData: cb(owner, "l|"+opts[i+1].Code),
-			})
+			row = append(row, languageButton(opts[i+1], lang, owner))
 		}
 		rows = append(rows, row)
 	}
 	rows = append(rows, navRow(lang, owner, inGroup))
 	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// languageButton paints the current language Success and nothing else: one
+// green button in a grid of sixteen answers "which one am I on?" before the
+// glyph in front of the label is read.
+func languageButton(opt i18n.LangOption, lang string, owner int64) tg.InlineKeyboardButton {
+	btn := tg.InlineKeyboardButton{
+		Text:         stateMark(opt.Code == lang) + opt.Label,
+		CallbackData: cb(owner, "l|"+opt.Code),
+	}
+	if opt.Code == lang {
+		btn.Style = tg.StyleSuccess
+	}
+	return btn
 }
 
 // statsPanel — personal or global stats (vido formatting). No query text anywhere.
@@ -203,11 +225,23 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 		}
 	}
 
+	personal := tg.InlineKeyboardButton{
+		Text: stateMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp"),
+	}
+	worldwide := tg.InlineKeyboardButton{
+		Text: stateMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg"),
+	}
+	// The open tab says which set of numbers is on screen. That is a state, not
+	// an action — pressing it does nothing — so it is Success, not Primary, and
+	// the panel keeps its one Primary slot free.
+	if global {
+		worldwide.Style = tg.StyleSuccess
+	} else {
+		personal.Style = tg.StyleSuccess
+	}
+
 	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
-		{
-			{Text: stateMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp")},
-			{Text: stateMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg")},
-		},
+		{personal, worldwide},
 		navRow(lang, owner, inGroup),
 	}}
 	return b.String(), kb

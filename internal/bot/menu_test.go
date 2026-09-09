@@ -237,6 +237,104 @@ func TestEveryOptionOfASetIsMarked(t *testing.T) {
 	}
 }
 
+// Success says "this is the state you are in": the current language and the open
+// statistics tab report state, they do not perform an action.
+func TestStateCarriesSuccessAndNothingElseIsColoured(t *testing.T) {
+	_, language := languagePanel("ru", 1, false)
+	for _, option := range i18n.LANGUAGE_OPTIONS {
+		button, _ := findButton(language, "m:1:l|"+option.Code)
+		want := ""
+		if option.Code == "ru" {
+			want = tg.StyleSuccess
+		}
+		if button.Style != want {
+			t.Errorf("%s has style %q, want %q", option.Code, button.Style, want)
+		}
+	}
+	for _, global := range []bool{false, true} {
+		open, shut := "m:1:statsp", "m:1:statsg"
+		if global {
+			open, shut = shut, open
+		}
+		_, stats := statsPanel("en", 1, db.Stats{}, global, "", false)
+		if button, _ := findButton(stats, open); button.Style != tg.StyleSuccess {
+			t.Errorf("the open tab has style %q, want Success — it reports state, not an action", button.Style)
+		}
+		if button, _ := findButton(stats, shut); button.Style != "" {
+			t.Errorf("the closed tab is coloured %q", button.Style)
+		}
+	}
+}
+
+// At most one Primary per screen, and on the DM home it is Language: nothing
+// else on that screen is readable until the language is right.
+func TestAtMostOnePrimaryPerScreen(t *testing.T) {
+	screens := map[string]*tg.InlineKeyboardMarkup{}
+	_, screens["home.dm"] = homePanel("en", "searchybot", "vidobot", 1, false)
+	_, screens["home.group"] = homePanel("en", "searchybot", "vidobot", 1, true)
+	_, screens["language"] = languagePanel("en", 1, true)
+	_, screens["stats"] = statsPanel("en", 1, db.Stats{}, false, "", true)
+	_, screens["help"] = infoPanel("en", 1, true, "help.title", "help.body", "bot", "searchybot")
+	_, screens["about"] = aboutPanel("en", 1, true)
+
+	for name, kb := range screens {
+		var primaries []string
+		for _, row := range kb.InlineKeyboard {
+			for _, button := range row {
+				if button.Style == tg.StylePrimary {
+					primaries = append(primaries, button.Text)
+				}
+			}
+		}
+		if len(primaries) > 1 {
+			t.Errorf("%s singles out nothing: %d primaries %v", name, len(primaries), primaries)
+		}
+	}
+	if button, ok := findButton(screens["home.dm"], "m:1:language"); !ok || button.Style != tg.StylePrimary {
+		t.Errorf("the DM home does not lead with Language: %q", button.Style)
+	}
+	// The group home leads by position with a SwitchInlineQuery button, which
+	// is the one thing everyone in the room can act on.
+	for _, row := range screens["home.group"].InlineKeyboard {
+		for _, button := range row {
+			if button.Style == tg.StylePrimary {
+				t.Errorf("the group home colours %q; the inline-search button already leads by position", button.Text)
+			}
+		}
+	}
+}
+
+// Close is written in exactly one place, so the word and the destructive colour
+// cannot drift apart. Every Close in the bot comes from closeButton.
+func TestEveryCloseIsDanger(t *testing.T) {
+	screens := map[string]*tg.InlineKeyboardMarkup{}
+	_, screens["home.group"] = homePanel("en", "searchybot", "vidobot", 1, true)
+	_, screens["language"] = languagePanel("en", 1, true)
+	_, screens["stats"] = statsPanel("en", 1, db.Stats{}, false, "", true)
+	_, screens["help"] = infoPanel("en", 1, true, "help.title", "help.body", "bot", "searchybot")
+	_, screens["about"] = aboutPanel("en", 1, true)
+	screens["grid"] = gridKeyboard("en", "tok", 0, 3)
+
+	closeLabel := i18n.T("en", "action.close")
+	for name, kb := range screens {
+		found := false
+		for _, row := range kb.InlineKeyboard {
+			for _, button := range row {
+				if button.Text != closeLabel {
+					continue
+				}
+				found = true
+				if button.Style != tg.StyleDanger {
+					t.Errorf("%s: Close has style %q, want Danger — it dismisses the panel", name, button.Style)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s has no Close", name)
+		}
+	}
+}
+
 func findButton(kb *tg.InlineKeyboardMarkup, data string) (tg.InlineKeyboardButton, bool) {
 	for _, row := range kb.InlineKeyboard {
 		for _, button := range row {
