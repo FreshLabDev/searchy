@@ -17,8 +17,16 @@ import (
 // {home, language, statsp, statsg, help, about, close} or "l|<code>".
 //
 // Formatting follows vido's rule exactly: a header of <b>title</b> + <i>hint</i>,
-// then a <blockquote> of content lines. Toggle marks use ◉ / ◎.
+// then a <blockquote> of content lines. Selection marks use ◉ / ◎.
 const menuPrefix = "m"
+
+// Selection marks. Both states are drawn, always: a set where only the chosen
+// option carries a glyph has one row starting two characters in from all the
+// others, which reads as a typo rather than as state.
+const (
+	markOn  = "◉ "
+	markOff = "◎ "
+)
 
 func cb(owner int64, action string) string {
 	return menuPrefix + ":" + strconv.FormatInt(owner, 10) + ":" + action
@@ -55,18 +63,14 @@ func blockquote(lines ...string) string {
 	return "<blockquote>" + strings.Join(lines, "\n") + "</blockquote>"
 }
 
-func tabMark(active bool) string {
+// stateMark marks one option out of a set — a language in the grid, a tab in
+// the statistics panel. Both are the same idea ("this is the one you are on"),
+// so they mark it the same way, and both states are always drawn.
+func stateMark(active bool) string {
 	if active {
-		return "◉ "
+		return markOn
 	}
-	return "◎ "
-}
-
-func curMark(active bool) string {
-	if active {
-		return "◉ "
-	}
-	return ""
+	return markOff
 }
 
 // navRow is the row every subordinate panel ends with.
@@ -149,18 +153,19 @@ func groupHome(lang, botUsername string, owner int64) (string, *tg.InlineKeyboar
 	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-// languagePanel — the language picker (2 per row), current one marked with ◉.
+// languagePanel — the language picker (2 per row), every option marked so the
+// column has one left edge.
 func languagePanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, "language.title", "language.hint")
 	opts := i18n.LANGUAGE_OPTIONS
 	var rows [][]tg.InlineKeyboardButton
 	for i := 0; i < len(opts); i += 2 {
 		row := []tg.InlineKeyboardButton{
-			{Text: curMark(opts[i].Code == lang) + opts[i].Label, CallbackData: cb(owner, "l|"+opts[i].Code)},
+			{Text: stateMark(opts[i].Code == lang) + opts[i].Label, CallbackData: cb(owner, "l|"+opts[i].Code)},
 		}
 		if i+1 < len(opts) {
 			row = append(row, tg.InlineKeyboardButton{
-				Text: curMark(opts[i+1].Code == lang) + opts[i+1].Label, CallbackData: cb(owner, "l|"+opts[i+1].Code),
+				Text: stateMark(opts[i+1].Code == lang) + opts[i+1].Label, CallbackData: cb(owner, "l|"+opts[i+1].Code),
 			})
 		}
 		rows = append(rows, row)
@@ -200,8 +205,8 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 
 	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
 		{
-			{Text: tabMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp")},
-			{Text: tabMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg")},
+			{Text: stateMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp")},
+			{Text: stateMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg")},
 		},
 		navRow(lang, owner, inGroup),
 	}}

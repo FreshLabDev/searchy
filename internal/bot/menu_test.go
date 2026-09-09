@@ -7,6 +7,7 @@ import (
 	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/buildinfo"
+	"searchy/internal/db"
 	"searchy/internal/i18n"
 )
 
@@ -192,15 +193,59 @@ func TestButtonsAndHeadingsCarryNoDecorativeEmoji(t *testing.T) {
 	}
 }
 
-// The selection and tab marks are the deliberate exception, and they must
-// survive the sweep.
+// The selection marks are the deliberate exception, and they must survive the
+// sweep. Both states are drawn: a set where only the chosen option is marked
+// leaves one row indented two characters past all the others.
 func TestStateMarksSurvive(t *testing.T) {
-	if curMark(true) != "◉ " || curMark(false) != "" {
-		t.Fatal("the language picker lost its selection mark")
+	if stateMark(true) != "◉ " || stateMark(false) != "◎ " {
+		t.Fatal("the selection marks lost a state")
 	}
-	if tabMark(true) != "◉ " || tabMark(false) != "◎ " {
-		t.Fatal("the stats panel lost its tab marks")
+}
+
+// Every option of a set is marked, so the column has one left edge. This was
+// wrong for a year: fifteen language buttons started at the edge and one did not.
+func TestEveryOptionOfASetIsMarked(t *testing.T) {
+	_, language := languagePanel("ru", 1, false)
+	marked := 0
+	for _, option := range i18n.LANGUAGE_OPTIONS {
+		button, ok := findButton(language, "m:1:l|"+option.Code)
+		if !ok {
+			t.Fatalf("the picker lost %s", option.Code)
+		}
+		if !strings.HasPrefix(button.Text, "◉ ") && !strings.HasPrefix(button.Text, "◎ ") {
+			t.Fatalf("%s starts at a different left edge: %q", option.Code, button.Text)
+		}
+		if strings.HasPrefix(button.Text, "◉ ") {
+			marked++
+		}
 	}
+	if marked != 1 {
+		t.Fatalf("%d languages claim to be the current one, want exactly 1", marked)
+	}
+
+	for _, global := range []bool{false, true} {
+		_, stats := statsPanel("en", 1, db.Stats{}, global, "", false)
+		for _, data := range []string{"m:1:statsp", "m:1:statsg"} {
+			button, ok := findButton(stats, data)
+			if !ok {
+				t.Fatalf("the stats panel lost %s", data)
+			}
+			if !strings.HasPrefix(button.Text, "◉ ") && !strings.HasPrefix(button.Text, "◎ ") {
+				t.Fatalf("tab %s is unmarked: %q", data, button.Text)
+			}
+		}
+	}
+}
+
+func findButton(kb *tg.InlineKeyboardMarkup, data string) (tg.InlineKeyboardButton, bool) {
+	for _, row := range kb.InlineKeyboard {
+		for _, button := range row {
+			if button.CallbackData == data {
+				return button, true
+			}
+		}
+	}
+	return tg.InlineKeyboardButton{}, false
 }
 
 func hasCallback(kb *tg.InlineKeyboardMarkup, data string) bool {
