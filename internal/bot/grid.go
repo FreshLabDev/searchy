@@ -337,11 +337,16 @@ func coverURL(r search.MediaResult) string {
 	return r.ThumbURL
 }
 
-// gridCaption is the vido-style header above the grid.
+// gridCaption is the vido-style header above the grid. The page counter has to
+// be interpolated, so it goes through titleCard rather than header, but it is
+// the same title card every panel in this bot draws.
 func gridCaption(lang string, page, total int) string {
 	totalPages := (total + gridPageSize - 1) / gridPageSize
-	return "<b>" + i18n.T(lang, "grid.title") + "</b>\n<i>" +
-		i18n.T(lang, "grid.hint", "page", strconv.Itoa(page+1), "total", strconv.Itoa(totalPages)) + "</i>"
+	return titleCard(
+		i18n.T(lang, "grid.title"),
+		i18n.T(lang, "grid.hint", "page", strconv.Itoa(page+1), "total", strconv.Itoa(totalPages)),
+		"\n",
+	)
 }
 
 // gridKeyboard builds: rows of numbered buttons (one per item on the page), a

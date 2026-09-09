@@ -335,6 +335,39 @@ func TestEveryCloseIsDanger(t *testing.T) {
 	}
 }
 
+// Every screen's text comes from the shared helpers. A panel that builds its own
+// <b>…</b>/<i>…</i> pair is how the family shape drifted apart in the first place.
+func TestEveryScreenIsBuiltFromTheSharedHelpers(t *testing.T) {
+	texts := map[string]string{}
+	texts["home.dm"], _ = homePanel("en", "searchybot", "vidobot", 1, false)
+	texts["home.group"], _ = homePanel("en", "searchybot", "vidobot", 1, true)
+	texts["language"], _ = languagePanel("en", 1, false)
+	texts["stats.empty"], _ = statsPanel("en", 1, db.Stats{PeakHour: -1}, false, "", false)
+	texts["stats.global"], _ = statsPanel("en", 1,
+		db.Stats{Searches: 3, Sent: 2, PhotoSent: 1, VideoSent: 1, Users: 4, PeakHour: 9}, true, "12:00 09.09.2026", false)
+	texts["help"], _ = infoPanel("en", 1, false, "help.title", "help.body", "bot", "searchybot")
+	texts["about"], _ = aboutPanel("en", 1, false)
+	texts["grid"] = gridCaption("en", 0, 30)
+
+	for name, text := range texts {
+		if !strings.HasPrefix(text, "<b>") {
+			t.Errorf("%s does not open with a bold title: %q", name, text)
+		}
+		// Two screens have no text substance to quote: the language picker's
+		// content is its keyboard, and the grid's is the collage above it.
+		if name == "language" || name == "grid" {
+			continue
+		}
+		if !strings.Contains(text, "<blockquote>") {
+			t.Errorf("%s puts its substance outside a blockquote: %q", name, text)
+		}
+	}
+	// The About card is the family's one-line variant: name · version.
+	if !strings.HasPrefix(texts["about"], "<b>Searchy</b> · <i>v") {
+		t.Errorf("the About card lost its name · version line: %q", texts["about"])
+	}
+}
+
 func findButton(kb *tg.InlineKeyboardMarkup, data string) (tg.InlineKeyboardButton, bool) {
 	for _, row := range kb.InlineKeyboard {
 		for _, button := range row {

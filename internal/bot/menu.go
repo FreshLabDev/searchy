@@ -46,13 +46,26 @@ func parseMenuCB(data string) (owner int64, action string, ok bool) {
 
 func strptr(s string) *string { return &s }
 
-// header builds vido's <b>title</b> + optional <i>hint</i>.
-func header(lang, titleKey, hintKey string) string {
-	s := "<b>" + i18n.T(lang, titleKey) + "</b>"
-	if hintKey != "" {
-		s += "\n<i>" + i18n.T(lang, hintKey) + "</i>"
+// titleCard is the single place this bot writes a panel's <b>title</b>/<i>hint</i>
+// pair, so no screen can invent its own. The separator is the only thing that
+// varies, and it varies exactly once: the family's About card is specified as
+// "<b>Name</b> · <i>vX.Y.Z</i>" on one line, every other panel puts the hint
+// on the line below.
+func titleCard(title, hint, sep string) string {
+	s := "<b>" + title + "</b>"
+	if hint != "" {
+		s += sep + "<i>" + hint + "</i>"
 	}
 	return s
+}
+
+// header builds vido's <b>title</b> + optional <i>hint</i> from translation keys.
+func header(lang, titleKey, hintKey string) string {
+	hint := ""
+	if hintKey != "" {
+		hint = i18n.T(lang, hintKey)
+	}
+	return titleCard(i18n.T(lang, titleKey), hint, "\n")
 }
 
 // blockquote wraps lines in Telegram's <blockquote>, vido style.
@@ -207,7 +220,7 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 	b.WriteString("\n\n")
 
 	if st.Searches == 0 && st.Sent == 0 {
-		b.WriteString(i18n.T(lang, "stats.empty"))
+		b.WriteString(blockquote(i18n.T(lang, "stats.empty")))
 	} else {
 		b.WriteString(blockquote(
 			i18n.T(lang, "stats.field.searches", "count", i64(st.Searches)),
@@ -216,7 +229,7 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 			i18n.T(lang, "stats.field.peak", "peak", peakLabel(st.PeakHour)),
 		))
 		if global && st.Users > 0 {
-			b.WriteString("\n\n<b>" + i18n.T(lang, "stats.meta.title") + "</b>\n")
+			b.WriteString("\n\n" + header(lang, "stats.meta.title", "") + "\n")
 			b.WriteString(blockquote(i18n.T(lang, "stats.meta.users", "count", i64(st.Users))))
 		}
 		if updated != "" {
@@ -263,7 +276,9 @@ func infoPanel(lang string, owner int64, inGroup bool, titleKey, bodyKey string,
 // one action is one too many.
 func aboutPanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	var b strings.Builder
-	b.WriteString("<b>Searchy</b> · <i>v" + aboutVersion(buildinfo.Version) + "</i>\n")
+	// Same title card as every other screen; the About card is the one place
+	// the family writes the hint (here, the version) on the title's own line.
+	b.WriteString(titleCard("Searchy", "v"+aboutVersion(buildinfo.Version), " · ") + "\n")
 	b.WriteString(i18n.T(lang, "about.tagline"))
 	b.WriteString("\n\n")
 	b.WriteString(blockquote(
