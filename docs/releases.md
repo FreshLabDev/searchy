@@ -132,12 +132,22 @@ docker pull ghcr.io/freshlabdev/searchy:<tag>
 docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/freshlabdev/searchy:<tag>
 ```
 
-That first pull is not a formality. Deploying straight to
-`ghcr.io/freshlabdev/searchy@sha256:<digest>` on a host that has never fetched
-the tag has answered `403` on a blob, and a single pull by tag cleared it every
-time; the cause was never pinned down, so treat pull-then-pin as the recipe
-rather than an optimisation. It also means the layers are already local when the
-stack comes up.
+That pull used to be mandatory, and it is worth saying why it no longer is,
+because the reason was never the digest. Deploying straight to
+`ghcr.io/freshlabdev/searchy@sha256:<digest>` answered `403` on a blob, and
+pulling the tag first always cleared it.
+
+The cause was the account doing the deploying. `ws04 deploy` runs as root, and
+root's stored GHCR credential could not read the private package; the
+pull-by-tag only worked because it was run as the login user, whose credential
+can — which left the image in the shared local store for `up` to find. The
+registry says which is which: asked for a manifest digest as if it were a blob,
+an account that can read the package answers `404`, one that cannot answers
+`403`. A `403` here is an access problem wearing a not-found costume.
+
+So the fix is on the host, not in the recipe: make sure the account the deploy
+runs as can read the package (`sudo docker login ghcr.io`), and pinning a digest
+works on its own. Pulling the tag first is still a fine way to warm the layers.
 
 Without a shell on the host, the API answers the same question:
 
