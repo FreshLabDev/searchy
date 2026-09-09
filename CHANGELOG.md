@@ -13,7 +13,7 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
-## v0.3.0-alpha.1 - 2026-09-09
+## v0.2.1 - 2026-09-09
 
 Searchy leaves the third-party Telegram client it was the last bot in the family
 to use, and moves onto the shared one. Nothing about searching changes; what
