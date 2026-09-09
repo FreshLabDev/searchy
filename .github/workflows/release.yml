@@ -15,6 +15,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require the tag on the branch its channel is published from
+        # docs/versioning.md: pre-releases are tagged on dev, stable releases on
+        # main. A stable tag that never went through main would publish
+        # something the production branch has not seen.
+        run: |
+          if printf '%s' "${GITHUB_REF_NAME}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
+            branch=dev
+          else
+            branch=main
+          fi
+          git fetch --no-tags origin "${branch}:refs/remotes/origin/${branch}"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${branch}"; then
+            echo "tag ${GITHUB_REF_NAME} is not an ancestor of origin/${branch}"
+            exit 1
+          fi
+
 
       - name: Resolve build metadata
         id: meta
@@ -48,7 +67,10 @@ jobs:
             capture { print }
           ' CHANGELOG.md >"${notes_file}"
           if [ ! -s "${notes_file}" ]; then
-            printf 'Release %s\n' "${GITHUB_REF_NAME}" >"${notes_file}"
+            # A release whose notes are the word "Release" tells nobody anything,
+            # and the changelog section is the only place they are written.
+            echo "CHANGELOG.md has no '## ${GITHUB_REF_NAME}' section"
+            exit 1
           fi
           echo "file=${notes_file}" >>"$GITHUB_OUTPUT"
 

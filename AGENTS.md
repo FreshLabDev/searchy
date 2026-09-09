@@ -88,9 +88,11 @@ private by design, and production-minded.
 
 ## Versioning
 
-- Two branches: work on `dev` (development), publish releases from `main`. The
-  `## Unreleased` changelog section tracks what has merged to `dev` but not yet
-  shipped. See `docs/versioning.md`.
+- Work on `dev`. Pre-releases (`-alpha.N`, `-beta.N`, `-rc.N`) are tagged on
+  `dev`; stable versions are tagged on `main`, on the merge commit from `dev`.
+  The test bot runs `dev`, the production bot runs `main`.
+  The `## Unreleased` changelog section tracks what has merged to `dev` but is
+  not yet tagged. See `docs/versioning.md`.
 - Follow `docs/versioning.md` for release tags.
 - Keep the first release line as `v0.1.0-alpha.1`, `v0.1.0-beta.1`,
   `v0.1.0-rc.1`, then `v0.1.0`.
