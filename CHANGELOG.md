@@ -301,7 +301,7 @@ groups — built with privacy and speed as first principles.
   - `/healthz` runtime health endpoint reporting the stamped build
     version/commit/date, a distroless image with a binary `-healthcheck` probe,
     graceful shutdown, and JSON structured logging.
-- Apache-2.0 license under FreshLab.
+- Apache-2.0 license under Asterfield.
 - Project documentation for architecture, the SearXNG integration, Telegram
   behavior, versioning, and release process.
 
