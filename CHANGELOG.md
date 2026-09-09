@@ -10,6 +10,16 @@ GitHub Releases.
 
 Use this section for changes that are merged but not released yet.
 
+### Changed
+
+- The production stack pulls the released image instead of building one.
+  `deploy/ws04/searchy/compose.yaml` built from a working copy on the host, so
+  what served users was not the artifact CI had tested, scanned and published,
+  and the version it reported came from `SEARCHY_VERSION` / `SEARCHY_COMMIT` /
+  `SEARCHY_BUILD_DATE` kept by hand in `.env`. Those are now baked into the
+  image by the release workflow, and `SEARCHY_IMAGE` -- which has no default,
+  so an unset one stops the stack -- names the GHCR reference to run.
+
 ## v0.2.0-alpha.4 - 2026-09-08
 
 ### Changed
