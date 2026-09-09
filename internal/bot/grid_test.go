@@ -3,6 +3,7 @@ package bot
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -14,8 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	telegram "github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
+	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/i18n"
 	"searchy/internal/search"
@@ -27,28 +27,29 @@ func TestSendGridPickRejectsVideoWithoutCover(t *testing.T) {
 
 	var sentPhoto int
 	var sentText string
-	api := telegramTestServer(t, func(method string, r *http.Request) {
+	api := telegramTestServer(t, func(method string, fields map[string]string) {
 		switch method {
 		case "sendPhoto":
 			sentPhoto++
 		case "sendMessage":
-			sentText = r.FormValue("text")
+			sentText = fields["text"]
 		}
 	})
 	defer api.Close()
 
 	h := &Handlers{
+		api:        newTestClient(t, api.URL),
 		httpClient: http.DefaultClient,
 		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	h.sendGridPick(context.Background(), newTelegramTestBot(t, api.URL), 42, 0, &gridSession{
+	h.sendGridPick(context.Background(), 42, 0, &gridSession{
 		lang: "ru",
 		results: []search.MediaResult{{
 			ID: "dead-cover", Category: search.CatVideo, Title: "Unavailable video",
 			ThumbURL: cover.URL + "/missing.jpg", PageURL: "https://video.example/watch/1",
 			Engine: "sepiasearch", Pool: search.PoolDiscovery,
 		}},
-	}, 0, &models.User{ID: 7})
+	}, 0, &tg.User{ID: 7})
 
 	if sentPhoto != 0 {
 		t.Fatalf("sent %d photo cards for an unavailable cover", sentPhoto)
@@ -68,11 +69,11 @@ func TestSendGridPickSendsVideoOnlyAsPhotoCard(t *testing.T) {
 	var sentPhoto int
 	var sentMessage int
 	var caption string
-	api := telegramTestServer(t, func(method string, r *http.Request) {
+	api := telegramTestServer(t, func(method string, fields map[string]string) {
 		switch method {
 		case "sendPhoto":
 			sentPhoto++
-			caption = r.FormValue("caption")
+			caption = fields["caption"]
 		case "sendMessage":
 			sentMessage++
 		}
@@ -80,17 +81,18 @@ func TestSendGridPickSendsVideoOnlyAsPhotoCard(t *testing.T) {
 	defer api.Close()
 
 	h := &Handlers{
+		api:        newTestClient(t, api.URL),
 		httpClient: http.DefaultClient,
 		log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	h.sendGridPick(context.Background(), newTelegramTestBot(t, api.URL), 42, 0, &gridSession{
+	h.sendGridPick(context.Background(), 42, 0, &gridSession{
 		lang: "ru",
 		results: []search.MediaResult{{
 			ID: "live-cover", Category: search.CatVideo, Title: "Available video",
 			ThumbURL: cover.URL + "/cover.jpg", PageURL: "https://video.example/watch/2",
 			Engine: "peertube", Pool: search.PoolDiscovery,
 		}},
-	}, 0, &models.User{ID: 7})
+	}, 0, &tg.User{ID: 7})
 
 	if sentPhoto != 1 || sentMessage != 0 {
 		t.Fatalf("sentPhoto=%d sentMessage=%d, want 1/0", sentPhoto, sentMessage)
@@ -100,14 +102,14 @@ func TestSendGridPickSendsVideoOnlyAsPhotoCard(t *testing.T) {
 	}
 }
 
-func telegramTestServer(t *testing.T, inspect func(string, *http.Request)) *httptest.Server {
+// telegramTestServer stubs the Bot API and hands each call to inspect. The
+// client posts JSON for everything except an upload, so both shapes are
+// flattened into the same map of parameters.
+func telegramTestServer(t *testing.T, inspect func(method string, fields map[string]string)) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(6 << 20); err != nil {
-			t.Errorf("parse Telegram form: %v", err)
-		}
-		method := strings.TrimPrefix(r.URL.Path, "/bottest-token/")
-		inspect(method, r)
+		method := strings.TrimPrefix(r.URL.Path, "/bot"+testToken+"/")
+		inspect(method, telegramRequestFields(t, r))
 		w.Header().Set("Content-Type", "application/json")
 		switch method {
 		case "sendPhoto", "sendMessage":
@@ -118,13 +120,43 @@ func telegramTestServer(t *testing.T, inspect func(string, *http.Request)) *http
 	}))
 }
 
-func newTelegramTestBot(t *testing.T, serverURL string) *telegram.Bot {
+func telegramRequestFields(t *testing.T, r *http.Request) map[string]string {
 	t.Helper()
-	b, err := telegram.New("test-token", telegram.WithSkipGetMe(), telegram.WithServerURL(serverURL))
-	if err != nil {
-		t.Fatal(err)
+	fields := map[string]string{}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		if err := r.ParseMultipartForm(6 << 20); err != nil {
+			t.Errorf("parse Telegram form: %v", err)
+			return fields
+		}
+		for name, values := range r.MultipartForm.Value {
+			if len(values) > 0 {
+				fields[name] = values[0]
+			}
+		}
+		return fields
 	}
-	return b
+	var body map[string]any
+	raw, err := io.ReadAll(r.Body)
+	if err != nil || json.Unmarshal(raw, &body) != nil {
+		t.Errorf("parse Telegram body: %v", err)
+		return fields
+	}
+	for name, value := range body {
+		if text, ok := value.(string); ok {
+			fields[name] = text
+			continue
+		}
+		encoded, _ := json.Marshal(value)
+		fields[name] = string(encoded)
+	}
+	return fields
+}
+
+const testToken = "test-token"
+
+func newTestClient(t *testing.T, serverURL string) *tg.Client {
+	t.Helper()
+	return tg.New(testToken, tg.WithAPIBase(serverURL))
 }
 
 func testJPEG(t *testing.T) []byte {

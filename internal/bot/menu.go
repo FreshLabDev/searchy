@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-telegram/bot/models"
+	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/buildinfo"
 	"searchy/internal/db"
@@ -70,11 +70,11 @@ func curMark(active bool) string {
 }
 
 // homePanel — the /start landing panel.
-func homePanel(lang, botUsername, vidoBotUsername string, owner int64) (string, *models.InlineKeyboardMarkup) {
+func homePanel(lang, botUsername, vidoBotUsername string, owner int64) (string, *tg.InlineKeyboardMarkup) {
 	text := i18n.T(lang, "home.title") + "\n\n" +
 		i18n.T(lang, "home.tagline") + "\n\n" +
 		i18n.T(lang, "home.hint", "bot", botUsername)
-	rows := [][]models.InlineKeyboardButton{
+	rows := [][]tg.InlineKeyboardButton{
 		{
 			{Text: i18n.T(lang, "btn.language"), CallbackData: cb(owner, "language")},
 			{Text: i18n.T(lang, "btn.stats"), CallbackData: cb(owner, "statsp")},
@@ -85,38 +85,38 @@ func homePanel(lang, botUsername, vidoBotUsername string, owner int64) (string, 
 		},
 	}
 	if vidoBotUsername != "" {
-		rows = append(rows, []models.InlineKeyboardButton{{
+		rows = append(rows, []tg.InlineKeyboardButton{{
 			Text: i18n.T(lang, "btn.video_settings"),
 			URL:  "https://t.me/" + vidoBotUsername + "?start=settings",
 		}})
 	}
-	rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")}})
-	kb := &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	rows = append(rows, []tg.InlineKeyboardButton{{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")}})
+	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 	return text, kb
 }
 
 // languagePanel — the language picker (2 per row), current one marked with ◉.
-func languagePanel(lang string, owner int64) (string, *models.InlineKeyboardMarkup) {
+func languagePanel(lang string, owner int64) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, "language.title", "language.hint")
 	opts := i18n.LANGUAGE_OPTIONS
-	var rows [][]models.InlineKeyboardButton
+	var rows [][]tg.InlineKeyboardButton
 	for i := 0; i < len(opts); i += 2 {
-		row := []models.InlineKeyboardButton{
+		row := []tg.InlineKeyboardButton{
 			{Text: curMark(opts[i].Code == lang) + opts[i].Label, CallbackData: cb(owner, "l|"+opts[i].Code)},
 		}
 		if i+1 < len(opts) {
-			row = append(row, models.InlineKeyboardButton{
+			row = append(row, tg.InlineKeyboardButton{
 				Text: curMark(opts[i+1].Code == lang) + opts[i+1].Label, CallbackData: cb(owner, "l|"+opts[i+1].Code),
 			})
 		}
 		rows = append(rows, row)
 	}
-	rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")}})
-	return text, &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	rows = append(rows, []tg.InlineKeyboardButton{{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")}})
+	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 // statsPanel — personal or global stats (vido formatting). No query text anywhere.
-func statsPanel(lang string, owner int64, st db.Stats, global bool, updated string) (string, *models.InlineKeyboardMarkup) {
+func statsPanel(lang string, owner int64, st db.Stats, global bool, updated string) (string, *tg.InlineKeyboardMarkup) {
 	titleKey, subKey := "stats.title.personal", "stats.subtitle.personal"
 	if global {
 		titleKey, subKey = "stats.title.global", "stats.subtitle.global"
@@ -144,7 +144,7 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 		}
 	}
 
-	kb := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
 		{
 			{Text: tabMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp")},
 			{Text: tabMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg")},
@@ -158,9 +158,9 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 }
 
 // infoPanel — a title + blockquote(body) screen (help, about) with Back/Close.
-func infoPanel(lang string, owner int64, titleKey, bodyKey string, bodyArgs ...string) (string, *models.InlineKeyboardMarkup) {
+func infoPanel(lang string, owner int64, titleKey, bodyKey string, bodyArgs ...string) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, titleKey, "") + "\n\n" + blockquote(i18n.T(lang, bodyKey, bodyArgs...))
-	kb := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
 		{
 			{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")},
 			{Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close")},
@@ -169,7 +169,7 @@ func infoPanel(lang string, owner int64, titleKey, bodyKey string, bodyArgs ...s
 	return text, kb
 }
 
-func aboutBody(lang string, owner int64) (string, *models.InlineKeyboardMarkup) {
+func aboutBody(lang string, owner int64) (string, *tg.InlineKeyboardMarkup) {
 	return infoPanel(lang, owner, "about.title", "about.body", "version", aboutVersion(buildinfo.Version), "date", buildinfo.Date)
 }
 

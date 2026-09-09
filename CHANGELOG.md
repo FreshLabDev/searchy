@@ -15,6 +15,40 @@ Use this section for changes that are merged but not released yet.
 
 ### Changed
 
+- **Searchy runs entirely on `github.com/FreshLabDev/tg`.**
+  `github.com/go-telegram/bot` is gone: the poll loop, every send, the inline
+  answers and the Vido delivery bridge all go through the family's own client.
+  Searchy was the last bot on a third-party library, which cost it everything
+  the shared client had learned — Bot API 10.3 button styles, ephemeral
+  messages, one place for token redaction, one retry policy, one set of error
+  classifiers — and the gap was only going to widen.
+- The dispatcher is now searchy's own long-polling loop. Updates are still
+  handled concurrently (`WORKERS`, default 32), because the inline path
+  deliberately blocks: the debouncer holds a keystroke for its window and
+  abandons it when a newer one arrives, which only works while both are in
+  flight. The offset advances as soon as an update is dispatched, as it did
+  before, and a failed poll backs off from one second to thirty rather than
+  ending the process.
+- **Preflight now lists everything searchy cannot work without**, not just two
+  methods: `answerInlineQuery`, `answerCallbackQuery`, `deleteMessage`,
+  `editMessageMedia`, `editMessageReplyMarkup`, `editMessageText`,
+  `sendMessage` and `sendPhoto` — plus `sendVideo`, `sendAudio`, `sendDocument`
+  and `sendMediaGroup` when the Vido bridge is on, since those are only
+  reachable through it. A Bot API server too old for any of them now refuses
+  the start instead of letting searchy poll happily and answer nothing, which
+  is the failure the check exists for.
+- A Vido plan's `local_file_uri` is sent as a local path rather than a bare
+  `file://` string, so a searchy pointed at Telegram's own endpoint is told
+  that the path could never work there, instead of getting back a
+  wrong-file-identifier error that points nowhere near the cause.
+- Delivery failures are classified from Telegram's HTTP status rather than a
+  library's sentinel errors. The `definite failure` set is unchanged (400, 401,
+  403, 404); everything else still becomes `delivery_unknown`, so a send that
+  may have landed is never silently retried.
+- Captions and text in a delivery plan are always sent as HTML. The plan field
+  is named `caption_html` and its text is Vido's own, so the previous
+  `parse_mode` passthrough only ever chose between HTML and rendering HTML
+  literally.
 - One versioning and release document for the whole family. `docs/versioning.md`
   and `docs/releases.md` are now byte-identical across every Asterfield
   repository apart from two clearly marked sections: this repository's own

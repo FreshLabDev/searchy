@@ -13,8 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
+	"github.com/FreshLabDev/tg"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 
 	"searchy/internal/core"
@@ -37,6 +36,7 @@ type resultMeta struct {
 
 type Handlers struct {
 	agg             *search.Aggregator
+	api             *tg.Client
 	deb             *debouncer
 	log             *slog.Logger
 	httpClient      *http.Client
@@ -48,7 +48,13 @@ type Handlers struct {
 	sharedCacheRoot string
 	maxResults      int
 	inlineCacheTime int
+	workers         int
 	requestTimeout  time.Duration
+
+	// pollBackoffStep is how much each consecutive poll failure adds to the
+	// wait before the next one. It is a field so a test can watch the loop
+	// recover without sleeping for whole seconds.
+	pollBackoffStep time.Duration
 
 	langCache  sync.Map // userID(int64) -> language(string)
 	resultMeta *lru.LRU[string, resultMeta]
@@ -59,6 +65,7 @@ type Handlers struct {
 
 type Options struct {
 	Aggregator      *search.Aggregator
+	Telegram        *tg.Client
 	Logger          *slog.Logger
 	HTTPClient      *http.Client
 	Store           *db.Store
@@ -69,6 +76,7 @@ type Options struct {
 	SharedCacheRoot string
 	MaxResults      int
 	InlineCacheTime int
+	Workers         int
 	DebounceDelay   time.Duration
 	RequestTimeout  time.Duration
 	StatsCacheTTL   time.Duration
@@ -77,6 +85,7 @@ type Options struct {
 func NewHandlers(o Options) *Handlers {
 	return &Handlers{
 		agg:             o.Aggregator,
+		api:             o.Telegram,
 		deb:             newDebouncer(o.DebounceDelay),
 		log:             o.Logger,
 		httpClient:      o.HTTPClient,
@@ -88,6 +97,7 @@ func NewHandlers(o Options) *Handlers {
 		sharedCacheRoot: o.SharedCacheRoot,
 		maxResults:      o.MaxResults,
 		inlineCacheTime: o.InlineCacheTime,
+		workers:         updateWorkers(o.Workers),
 		requestTimeout:  o.RequestTimeout,
 		resultMeta:      lru.NewLRU[string, resultMeta](8192, nil, time.Hour),
 		// Sessions now memoize rendered page JPEGs, so cap the count to bound memory
@@ -105,38 +115,38 @@ func statsTTL(d time.Duration) time.Duration {
 }
 
 // SetBotUsername sets the bot's @username (without @), used in inline prompts and
-// the /start text. Called once at startup before Start.
+// the /start text. Called once at startup, before Run.
 func (h *Handlers) SetBotUsername(u string) { h.botUsername = u }
 
 // Route is the bot's default handler; it dispatches by update type.
-func (h *Handlers) Route(ctx context.Context, b *bot.Bot, update *models.Update) {
+func (h *Handlers) Route(ctx context.Context, update *tg.Update) {
 	switch {
 	case update.InlineQuery != nil:
-		h.onInline(ctx, b, update.InlineQuery)
+		h.onInline(ctx, update.InlineQuery)
 	case update.ChosenInlineResult != nil:
 		h.onChosen(update.ChosenInlineResult)
-	case update.CallbackQuery != nil:
-		h.onCallback(ctx, b, update.CallbackQuery)
+	case update.Callback != nil:
+		h.onCallback(ctx, update.Callback)
 	case update.Message != nil:
-		h.onMessage(ctx, b, update.Message)
+		h.onMessage(ctx, update.Message)
 	}
 }
 
 // ---- inline search ----
 
-func (h *Handlers) onInline(ctx context.Context, b *bot.Bot, iq *models.InlineQuery) {
-	if iq.From == nil { // malformed update — From is required for debounce/analytics
+func (h *Handlers) onInline(ctx context.Context, iq *tg.InlineQuery) {
+	if iq.From.ID == 0 { // malformed update — From is required for debounce/analytics
 		return
 	}
 	raw := strings.TrimSpace(iq.Query)
 	if raw == "" {
-		lang := h.langCached(iq.From)
-		h.answer(ctx, b, iq.ID, promptResult(lang, h.botUsername), "", 5)
+		lang := h.langCached(&iq.From)
+		h.answer(ctx, iq.ID, promptResult(lang, h.botUsername), "", 5)
 		return
 	}
 	// Resolve core once on a cold cache so a manual language choice also affects
 	// inline search after restart. Subsequent keystrokes stay on the fast cache.
-	lang := h.langResolve(ctx, iq.From)
+	lang := h.langResolve(ctx, &iq.From)
 
 	dctx, dcancel, ok := h.deb.gate(ctx, iq.From.ID)
 	defer dcancel()
@@ -146,7 +156,7 @@ func (h *Handlers) onInline(ctx context.Context, b *bot.Bot, iq *models.InlineQu
 
 	cats, q := parseQuery(raw)
 	if strings.TrimSpace(q) == "" {
-		h.answer(ctx, b, iq.ID, promptResult(lang, h.botUsername), "", 5)
+		h.answer(ctx, iq.ID, promptResult(lang, h.botUsername), "", 5)
 		return
 	}
 	page := decodeOffset(iq.Offset)
@@ -159,14 +169,14 @@ func (h *Handlers) onInline(ctx context.Context, b *bot.Bot, iq *models.InlineQu
 		return // superseded by a newer query
 	}
 
-	downloadURLs := h.inlineDownloadURLs(dctx, iq.From, results)
+	downloadURLs := h.inlineDownloadURLs(dctx, &iq.From, results)
 	inline := buildInlineResults(results, lang, downloadURLs)
 	h.cacheMeta(results) // so chosen_inline_result can record what was sent
 	h.log.Info("inline", "page", page, "results", len(inline), "ms", time.Since(start).Milliseconds())
 
 	if page == 0 {
-		h.recordSearch(iq.From, categoryStr(cats), len(inline), int(time.Since(start).Milliseconds()), "inline")
-		h.touchCore(iq.From, nil) // inline has no chat context → DM/0 presence rollup
+		h.recordSearch(&iq.From, categoryStr(cats), len(inline), int(time.Since(start).Milliseconds()), "inline")
+		h.touchCore(&iq.From, nil) // inline has no chat context → DM/0 presence rollup
 	}
 
 	next := ""
@@ -176,16 +186,17 @@ func (h *Handlers) onInline(ctx context.Context, b *bot.Bot, iq *models.InlineQu
 	if len(inline) == 0 && page == 0 {
 		inline = emptyResult(lang, q)
 	}
-	h.answer(ctx, b, iq.ID, inline, next, h.inlineCacheTime)
+	h.answer(ctx, iq.ID, inline, next, h.inlineCacheTime)
 }
 
-func (h *Handlers) answer(ctx context.Context, b *bot.Bot, id string, results []models.InlineQueryResult, next string, cacheTime int) {
-	_, err := b.AnswerInlineQuery(ctx, &bot.AnswerInlineQueryParams{
-		InlineQueryID: id,
-		Results:       results,
-		CacheTime:     cacheTime,
-		IsPersonal:    true,
-		NextOffset:    next,
+func (h *Handlers) answer(ctx context.Context, id string, results []tg.InlineQueryResult, next string, cacheTime int) {
+	err := h.api.AnswerInlineQuery(ctx, id, tg.InlineAnswer{
+		Results:    results,
+		NextOffset: next,
+		CacheTime:  cacheTime,
+		// Results depend on the asker's language and carry download links bound
+		// to them, so a shared cache entry would hand one user another's.
+		IsPersonal: true,
 	})
 	if err != nil {
 		h.log.Warn("answerInlineQuery failed", "err", err)
@@ -194,7 +205,7 @@ func (h *Handlers) answer(ctx context.Context, b *bot.Bot, id string, results []
 
 // onChosen records which result the user actually sent (needs inline feedback
 // enabled in @BotFather). The query comes with the update; the rest from cache.
-func (h *Handlers) onChosen(cr *models.ChosenInlineResult) {
+func (h *Handlers) onChosen(cr *tg.ChosenInlineResult) {
 	h.touchCore(&cr.From, nil) // a user sent a result → presence for this bot
 	if h.store == nil {
 		return
@@ -213,104 +224,93 @@ func (h *Handlers) onChosen(cr *models.ChosenInlineResult) {
 
 // ---- callbacks (menu + owner-bound Vido downloads) ----
 
-func (h *Handlers) onCallback(ctx context.Context, b *bot.Bot, cq *models.CallbackQuery) {
+func (h *Handlers) onCallback(ctx context.Context, cq *tg.CallbackQuery) {
 	if token, kind, ok := parseDownloadCB(cq.Data); ok {
-		h.onDownloadCallback(ctx, b, cq, token, kind)
+		h.onDownloadCallback(ctx, cq, token, kind)
 		return
 	}
 
 	// Grid buttons (DM/group result grid): page, pick, close.
 	if tok, action, arg, ok := parseGridCB(cq.Data); ok {
-		h.onGridCallback(ctx, b, cq, tok, action, arg)
+		h.onGridCallback(ctx, cq, tok, action, arg)
 		return
 	}
 
 	owner, action, ok := parseMenuCB(cq.Data)
 	if !ok {
-		h.answerCB(ctx, b, cq.ID, "", false)
+		h.answerCB(ctx, cq.ID, "", false)
 		return
 	}
 	if cq.From.ID != owner {
-		h.answerCB(ctx, b, cq.ID, i18n.T(h.langCached(&cq.From), "menu.notyours"), true)
+		h.answerCB(ctx, cq.ID, i18n.T(h.langCached(&cq.From), "menu.notyours"), true)
 		return
 	}
-	if cq.Message.Message == nil { // inaccessible (too old)
-		h.answerCB(ctx, b, cq.ID, "", false)
+	if cq.Message.MessageID == 0 { // inaccessible (too old)
+		h.answerCB(ctx, cq.ID, "", false)
 		return
 	}
-	chatID := cq.Message.Message.Chat.ID
-	msgID := cq.Message.Message.ID
-	h.touchCore(&cq.From, &cq.Message.Message.Chat)
+	chatID := cq.Message.Chat.ID
+	msgID := cq.Message.MessageID
+	h.touchCore(&cq.From, &cq.Message.Chat)
 	lang := h.langResolve(ctx, &cq.From)
 
 	switch {
 	case action == "close":
-		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msgID})
-		h.answerCB(ctx, b, cq.ID, "", false)
+		_ = h.api.DeleteMessage(ctx, chatID, msgID)
+		h.answerCB(ctx, cq.ID, "", false)
 		return
 	case action == "home":
 		text, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, owner)
-		h.editPanel(ctx, b, chatID, msgID, text, kb)
+		h.editPanel(ctx, chatID, msgID, text, kb)
 	case action == "language":
 		text, kb := languagePanel(lang, owner)
-		h.editPanel(ctx, b, chatID, msgID, text, kb)
+		h.editPanel(ctx, chatID, msgID, text, kb)
 	case strings.HasPrefix(action, "l|"):
 		code := action[2:]
 		if i18n.IsSupported(code) {
 			h.setLanguage(cq.From.ID, code, core.SourceManual)
 			lang = code
 			text, kb := languagePanel(lang, owner)
-			h.editPanel(ctx, b, chatID, msgID, text, kb)
-			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "language.updated", "language", i18n.LabelOf(code)), false)
+			h.editPanel(ctx, chatID, msgID, text, kb)
+			h.answerCB(ctx, cq.ID, i18n.T(lang, "language.updated", "language", i18n.LabelOf(code)), false)
 			return
 		}
 	case action == "statsp" || action == "statsg":
 		global := action == "statsg"
 		st, updated := h.statsView(ctx, cq.From.ID, global)
 		text, kb := statsPanel(lang, owner, st, global, updated)
-		h.editPanel(ctx, b, chatID, msgID, text, kb)
+		h.editPanel(ctx, chatID, msgID, text, kb)
 	case action == "help":
 		text, kb := infoPanel(lang, owner, "help.title", "help.body", "bot", h.botUsername)
-		h.editPanel(ctx, b, chatID, msgID, text, kb)
+		h.editPanel(ctx, chatID, msgID, text, kb)
 	case action == "about":
 		text, kb := aboutBody(lang, owner)
-		h.editPanel(ctx, b, chatID, msgID, text, kb)
+		h.editPanel(ctx, chatID, msgID, text, kb)
 	}
-	h.answerCB(ctx, b, cq.ID, "", false)
+	h.answerCB(ctx, cq.ID, "", false)
 }
 
-func (h *Handlers) editPanel(ctx context.Context, b *bot.Bot, chatID int64, msgID int, text string, kb *models.InlineKeyboardMarkup) {
-	_, err := b.EditMessageText(ctx, &bot.EditMessageTextParams{
-		ChatID:             chatID,
-		MessageID:          msgID,
-		Text:               text,
-		ParseMode:          models.ParseModeHTML,
-		ReplyMarkup:        kb,
-		LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: ptrBool(true)},
-	})
-	if err != nil {
+func (h *Handlers) editPanel(ctx context.Context, chatID, msgID int64, text string, kb *tg.InlineKeyboardMarkup) {
+	if err := h.api.EditMessageText(ctx, chatID, msgID, text, kb); err != nil {
 		h.log.Warn("editMessageText failed", "err", err)
 	}
 }
 
-func (h *Handlers) answerCB(ctx context.Context, b *bot.Bot, id, text string, alert bool) {
-	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
-		CallbackQueryID: id,
-		Text:            text,
-		ShowAlert:       alert,
-	})
+func (h *Handlers) answerCB(ctx context.Context, id, text string, alert bool) {
+	if alert {
+		_ = h.api.AnswerCallbackQueryAlert(ctx, id, text)
+		return
+	}
+	_ = h.api.AnswerCallbackQuery(ctx, id, text)
 }
 
-func (h *Handlers) answerCBURL(ctx context.Context, b *bot.Bot, id, url string) {
-	_, _ = b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
-		CallbackQueryID: id,
-		URL:             url,
-	})
+func (h *Handlers) answerCBURL(ctx context.Context, id, url string) {
+	_ = h.api.AnswerCallbackQueryURL(ctx, id, url)
 }
 
 // ---- messages (commands + DM search) ----
 
-func (h *Handlers) onMessage(ctx context.Context, b *bot.Bot, msg *models.Message) {
+func (h *Handlers) onMessage(ctx context.Context, msg *tg.Message) {
 	if msg.From == nil || msg.Chat.ID == 0 {
 		return
 	}
@@ -329,41 +329,41 @@ func (h *Handlers) onMessage(ctx context.Context, b *bot.Bot, msg *models.Messag
 		case "start":
 			lang := h.onStart(ctx, msg.From)
 			t, kb := homePanel(lang, h.botUsername, h.vidoBotUsername, msg.From.ID)
-			h.sendPanel(ctx, b, msg.Chat.ID, t, kb)
+			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		case "search":
 			// "/search <query>" runs a full grid search right here (the main way to
 			// search in groups). With no query, offer a one-tap inline-search button.
 			lang := h.langResolve(ctx, msg.From)
 			if arg == "" {
-				kb := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+				kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
 					{{Text: i18n.T(lang, "btn.search"), SwitchInlineQueryCurrentChat: strptr("")}},
 				}}
-				h.sendPanel(ctx, b, msg.Chat.ID, i18n.T(lang, "search.usage", "bot", h.botUsername), kb)
+				h.sendPanel(ctx, msg.Chat.ID, i18n.T(lang, "search.usage", "bot", h.botUsername), kb)
 				return
 			}
 			source := "group"
-			if msg.Chat.Type == models.ChatTypePrivate {
+			if msg.Chat.Type == tg.ChatPrivate {
 				source = "dm"
 			}
-			h.runGridSearch(ctx, b, msg.Chat.ID, msg.MessageThreadID, msg.From, arg, source)
+			h.runGridSearch(ctx, msg.Chat.ID, msg.MessageThreadID, msg.From, arg, source)
 		case "help":
 			lang := h.langResolve(ctx, msg.From)
 			t, kb := infoPanel(lang, msg.From.ID, "help.title", "help.body", "bot", h.botUsername)
-			h.sendPanel(ctx, b, msg.Chat.ID, t, kb)
+			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		case "stats":
 			lang := h.langResolve(ctx, msg.From)
 			st, updated := h.statsView(ctx, msg.From.ID, false)
 			t, kb := statsPanel(lang, msg.From.ID, st, false, updated)
-			h.sendPanel(ctx, b, msg.Chat.ID, t, kb)
+			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		case "about":
 			lang := h.langResolve(ctx, msg.From)
 			t, kb := aboutBody(lang, msg.From.ID)
-			h.sendPanel(ctx, b, msg.Chat.ID, t, kb)
+			h.sendPanel(ctx, msg.Chat.ID, t, kb)
 		default:
 			// Unknown command: nudge in private chats only (don't spam groups).
-			if msg.Chat.Type == models.ChatTypePrivate {
+			if msg.Chat.Type == tg.ChatPrivate {
 				lang := h.langResolve(ctx, msg.From)
-				h.reply(ctx, b, msg.Chat.ID, i18n.T(lang, "cmd.unknown"))
+				h.reply(ctx, msg.Chat.ID, i18n.T(lang, "cmd.unknown"))
 			}
 		}
 		return
@@ -371,33 +371,25 @@ func (h *Handlers) onMessage(ctx context.Context, b *bot.Bot, msg *models.Messag
 
 	// Plain text triggers a search only in private chats; in groups, searching is
 	// explicit via /search to avoid reacting to every message.
-	if msg.Chat.Type != models.ChatTypePrivate {
+	if msg.Chat.Type != tg.ChatPrivate {
 		return
 	}
-	h.runGridSearch(ctx, b, msg.Chat.ID, msg.MessageThreadID, msg.From, text, "dm")
+	h.runGridSearch(ctx, msg.Chat.ID, msg.MessageThreadID, msg.From, text, "dm")
 }
 
-func (h *Handlers) sendPanel(ctx context.Context, b *bot.Bot, chatID int64, text string, kb *models.InlineKeyboardMarkup) {
-	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:             chatID,
-		Text:               text,
-		ParseMode:          models.ParseModeHTML,
-		ReplyMarkup:        kb,
-		LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: ptrBool(true)},
-	})
-	if err != nil {
+func (h *Handlers) sendPanel(ctx context.Context, chatID int64, text string, kb *tg.InlineKeyboardMarkup) {
+	if _, err := h.api.SendMessage(ctx, chatID, text, kb); err != nil {
 		h.log.Warn("sendMessage (panel) failed", "err", err)
 	}
 }
 
-func (h *Handlers) reply(ctx context.Context, b *bot.Bot, chatID int64, text string) {
-	h.replyThread(ctx, b, chatID, 0, text)
+func (h *Handlers) reply(ctx context.Context, chatID int64, text string) {
+	h.replyThread(ctx, chatID, 0, text)
 }
 
 // replyThread is reply scoped to a forum topic (threadID 0 outside topic groups).
-func (h *Handlers) replyThread(ctx context.Context, b *bot.Bot, chatID int64, threadID int, text string) {
-	_, err := b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, MessageThreadID: threadID, Text: text, ParseMode: models.ParseModeHTML})
-	if err != nil {
+func (h *Handlers) replyThread(ctx context.Context, chatID int64, threadID int, text string) {
+	if _, err := h.api.SendReply(ctx, chatID, 0, threadID, text, nil); err != nil {
 		h.log.Warn("sendMessage failed", "err", err)
 	}
 }
@@ -406,7 +398,7 @@ func (h *Handlers) replyThread(ctx context.Context, b *bot.Bot, chatID int64, th
 
 // langCached returns the user's language from the in-memory cache, falling back
 // to the Telegram-reported code (no DB). Used in the inline hot path.
-func (h *Handlers) langCached(u *models.User) string {
+func (h *Handlers) langCached(u *tg.User) string {
 	if u == nil {
 		return i18n.DefaultLang
 	}
@@ -418,7 +410,7 @@ func (h *Handlers) langCached(u *models.User) string {
 
 // coreUserLang reads the user's resolved personal language from core on a cache
 // miss, memoizing it. Returns false when core is unset/unreachable or unset.
-func (h *Handlers) coreUserLang(ctx context.Context, u *models.User) (string, bool) {
+func (h *Handlers) coreUserLang(ctx context.Context, u *tg.User) (string, bool) {
 	if h.core == nil {
 		return "", false
 	}
@@ -435,7 +427,7 @@ func (h *Handlers) coreUserLang(ctx context.Context, u *models.User) (string, bo
 // on cold DM/menu paths, not the inline hot path). Personal surfaces resolve with
 // the user's own language (prefer=user), so a personal manual choice wins even in
 // a group.
-func (h *Handlers) langResolve(ctx context.Context, u *models.User) string {
+func (h *Handlers) langResolve(ctx context.Context, u *tg.User) string {
 	if u == nil {
 		return i18n.DefaultLang
 	}
@@ -452,7 +444,7 @@ func (h *Handlers) langResolve(ctx context.Context, u *models.User) string {
 
 // onStart resolves the user's language, auto-detecting from the Telegram hint on
 // first contact (persisted to core as this bot's 'auto' claim), like vido.
-func (h *Handlers) onStart(ctx context.Context, u *models.User) string {
+func (h *Handlers) onStart(ctx context.Context, u *tg.User) string {
 	if u == nil {
 		return i18n.DefaultLang
 	}
@@ -539,7 +531,7 @@ func (h *Handlers) fetchStats(ctx context.Context, key int64, global bool) db.St
 // touchCore records identity + presence (+ the Telegram language hint) in the
 // shared core store, best-effort and off the hot path. Private chats pass a nil
 // chat so presence rolls up under chat 0 and the chat directory stays group-only.
-func (h *Handlers) touchCore(u *models.User, chat *models.Chat) {
+func (h *Handlers) touchCore(u *tg.User, chat *tg.Chat) {
 	if h.core == nil || u == nil {
 		return
 	}
@@ -547,7 +539,7 @@ func (h *Handlers) touchCore(u *models.User, chat *models.Chat) {
 		UserID: u.ID, Username: u.Username, FirstName: u.FirstName,
 		LastName: u.LastName, TelegramLang: u.LanguageCode, IsBot: u.IsBot,
 	}
-	if chat != nil && chat.Type != models.ChatTypePrivate && chat.ID != 0 {
+	if chat != nil && chat.Type != tg.ChatPrivate && chat.ID != 0 {
 		id := chat.ID
 		a.ChatID = &id
 		a.ChatType = string(chat.Type)
@@ -561,7 +553,7 @@ func (h *Handlers) touchCore(u *models.User, chat *models.Chat) {
 	}()
 }
 
-func (h *Handlers) recordSearch(u *models.User, category string, count, ms int, source string) {
+func (h *Handlers) recordSearch(u *tg.User, category string, count, ms int, source string) {
 	if h.store == nil || u == nil {
 		return
 	}
@@ -642,18 +634,16 @@ func decodeOffset(s string) int {
 
 func encodeOffset(page int) string { return strconv.Itoa(page) }
 
-func emptyResult(lang, q string) []models.InlineQueryResult {
-	return []models.InlineQueryResult{
-		&models.InlineQueryResultArticle{
+func emptyResult(lang, q string) []tg.InlineQueryResult {
+	return []tg.InlineQueryResult{
+		tg.InlineQueryResultArticle{
 			ID:                  "empty",
 			Title:               i18n.T(lang, "search.empty_title", "query", q),
 			Description:         i18n.T(lang, "help.hint"),
-			InputMessageContent: models.InputTextMessageContent{MessageText: i18n.T(lang, "help.hint")},
+			InputMessageContent: tg.InputTextMessageContent{MessageText: i18n.T(lang, "help.hint")},
 		},
 	}
 }
-
-func ptrBool(b bool) *bool { return &b }
 
 var kyivLoc = func() *time.Location {
 	loc, err := time.LoadLocation("Europe/Kyiv")

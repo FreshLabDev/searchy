@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
+	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/i18n"
 	vidobridge "searchy/internal/vido"
@@ -17,7 +17,7 @@ import (
 
 // RunDeliveryWorker claims transport-neutral plans from core and executes only
 // the whitelisted Telegram operations validated by Searchy.
-func (h *Handlers) RunDeliveryWorker(ctx context.Context, b *bot.Bot) {
+func (h *Handlers) RunDeliveryWorker(ctx context.Context) {
 	if h.vido == nil || !h.vido.Ready() {
 		return
 	}
@@ -40,7 +40,7 @@ func (h *Handlers) RunDeliveryWorker(ctx context.Context, b *bot.Bot) {
 				cancel()
 			}
 		} else if delivery != nil {
-			h.deliverPlan(ctx, b, workerID, delivery)
+			h.deliverPlan(ctx, workerID, delivery)
 			continue
 		}
 		select {
@@ -54,7 +54,7 @@ func (h *Handlers) RunDeliveryWorker(ctx context.Context, b *bot.Bot) {
 // RunNotificationWorker durably delivers terminal processing status after a
 // Searchy restart. Chat actions remain best-effort; failures and explicit
 // delivery-unknown retry controls do not live only in process memory.
-func (h *Handlers) RunNotificationWorker(ctx context.Context, b *bot.Bot) {
+func (h *Handlers) RunNotificationWorker(ctx context.Context) {
 	if h.vido == nil || !h.vido.Ready() {
 		return
 	}
@@ -67,7 +67,7 @@ func (h *Handlers) RunNotificationWorker(ctx context.Context, b *bot.Bot) {
 		if err != nil {
 			h.log.Warn("claim vido notification failed", "err", err)
 		} else if n != nil {
-			if err := h.deliverNotification(ctx, b, n); err != nil {
+			if err := h.deliverNotification(ctx, n); err != nil {
 				h.log.Warn("deliver vido notification failed", "job_id", n.JobID, "status", n.Status, "err", err)
 			} else if err := h.ackNotificationWithRetry(ctx, workerID, n); err != nil {
 				h.log.Warn("ack vido notification failed", "job_id", n.JobID, "err", err)
@@ -102,28 +102,23 @@ func (h *Handlers) ackNotificationWithRetry(ctx context.Context, workerID string
 	return last
 }
 
-func (h *Handlers) deliverNotification(ctx context.Context, b *bot.Bot, n *vidobridge.Notification) error {
+func (h *Handlers) deliverNotification(ctx context.Context, n *vidobridge.Notification) error {
 	lang := i18n.Resolve(n.Language)
 	if n.Status == "delivery_unknown" {
 		if n.OriginMessageID == 0 || n.RetryToken == "" {
 			return errors.New("delivery_unknown notification is missing retry context")
 		}
-		_, err := b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
-			ChatID: n.TargetChatID, MessageID: n.OriginMessageID,
-			ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{
+		return h.api.EditMessageReplyMarkup(ctx, n.TargetChatID, int64(n.OriginMessageID),
+			&tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{{{
 				Text: i18n.T(lang, "download.retry_button"), CallbackData: retryCallbackPrefix + n.RetryToken,
-			}}}},
-		})
-		return err
+			}}}})
 	}
-	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: n.TargetChatID, MessageThreadID: n.TargetThreadID,
-		Text: i18n.T(lang, searchyDownloadErrorKey(n.MessageKey)),
-	})
+	_, err := h.api.SendReply(ctx, n.TargetChatID, 0, n.TargetThreadID,
+		i18n.T(lang, searchyDownloadErrorKey(n.MessageKey)), nil)
 	return err
 }
 
-func (h *Handlers) deliverPlan(ctx context.Context, b *bot.Bot, workerID string, delivery *vidobridge.Delivery) {
+func (h *Handlers) deliverPlan(ctx context.Context, workerID string, delivery *vidobridge.Delivery) {
 	if err := vidobridge.ValidatePlan(delivery.Plan, delivery.JobID, h.sharedCacheRoot); err != nil {
 		h.log.Warn("rejected vido delivery plan", "job_id", delivery.JobID, "err", err)
 		if rejectErr := h.vido.RejectDelivery(ctx, workerID, delivery.JobID, "invalid_delivery_plan"); rejectErr != nil {
@@ -148,7 +143,7 @@ func (h *Handlers) deliverPlan(ctx context.Context, b *bot.Bot, workerID string,
 			h.log.Warn("begin vido Telegram operation failed", "job_id", delivery.JobID, "operation", op.OperationID, "err", err)
 			return
 		}
-		messages, err := h.sendOperation(ctx, b, delivery, op)
+		messages, err := h.sendOperation(ctx, delivery, op)
 		if err != nil {
 			if sources := invalidFileIDSources(op, err); len(sources) > 0 {
 				for _, source := range sources {
@@ -168,7 +163,7 @@ func (h *Handlers) deliverPlan(ctx context.Context, b *bot.Bot, workerID string,
 		refs := operationFileRefs(op, messages)
 		messageID := 0
 		if len(messages) > 0 {
-			messageID = messages[0].ID
+			messageID = int(messages[0].MessageID)
 		}
 		if err := h.ackOperationWithRetry(ctx, workerID, delivery.JobID, op, messageID, refs); err != nil {
 			h.log.Warn("ack vido operation failed", "job_id", delivery.JobID, "operation", op.OperationID, "err", err)
@@ -245,73 +240,71 @@ func retryBridgeCommit(
 	}
 }
 
-func (h *Handlers) sendOperation(ctx context.Context, b *bot.Bot, delivery *vidobridge.Delivery, op vidobridge.Operation) ([]*models.Message, error) {
+func (h *Handlers) sendOperation(ctx context.Context, delivery *vidobridge.Delivery, op vidobridge.Operation) ([]tg.Message, error) {
 	chatID, threadID := delivery.TargetChatID, delivery.TargetThreadID
 	markup := operationMarkup(op.Buttons)
-	send := func() ([]*models.Message, error) {
+	// A plan's captions arrive in a field named caption_html and its text is
+	// Vido's own; the client sends both as HTML, like everything else here.
+	caption := tg.CaptionOptions{ThreadID: threadID, Caption: op.CaptionHTML, Markup: markup}
+	send := func() ([]tg.Message, error) {
 		switch op.Type {
 		case "video":
-			msg, err := b.SendVideo(ctx, &bot.SendVideoParams{
-				ChatID: chatID, MessageThreadID: threadID, Video: inputFile(*op.Source),
-				Caption: op.CaptionHTML, ParseMode: parseMode(op.ParseMode), ReplyMarkup: markup,
-				Width: op.Width, Height: op.Height, Duration: op.Duration, SupportsStreaming: op.SupportsStreaming,
+			msg, err := h.api.SendVideo(ctx, chatID, inputFile(*op.Source), tg.VideoOptions{
+				CaptionOptions:    caption,
+				Width:             op.Width,
+				Height:            op.Height,
+				Duration:          op.Duration,
+				SupportsStreaming: op.SupportsStreaming,
 			})
-			return oneMessage(msg), err
+			return oneMessage(msg, err), err
 		case "photo":
-			msg, err := b.SendPhoto(ctx, &bot.SendPhotoParams{
-				ChatID: chatID, MessageThreadID: threadID, Photo: inputFile(*op.Source),
-				Caption: op.CaptionHTML, ParseMode: parseMode(op.ParseMode), ReplyMarkup: markup,
-			})
-			return oneMessage(msg), err
+			msg, err := h.api.SendPhoto(ctx, chatID, inputFile(*op.Source), caption)
+			return oneMessage(msg, err), err
 		case "audio":
-			msg, err := b.SendAudio(ctx, &bot.SendAudioParams{
-				ChatID: chatID, MessageThreadID: threadID, Audio: inputFile(*op.Source),
-				Caption: op.CaptionHTML, ParseMode: parseMode(op.ParseMode), ReplyMarkup: markup,
-				Duration: op.Duration, Performer: op.Performer, Title: op.Title,
+			msg, err := h.api.SendAudio(ctx, chatID, inputFile(*op.Source), tg.AudioOptions{
+				CaptionOptions: caption,
+				Duration:       op.Duration,
+				Performer:      op.Performer,
+				Title:          op.Title,
 			})
-			return oneMessage(msg), err
+			return oneMessage(msg, err), err
 		case "document":
-			msg, err := b.SendDocument(ctx, &bot.SendDocumentParams{
-				ChatID: chatID, MessageThreadID: threadID, Document: inputFile(*op.Source),
-				Caption: op.CaptionHTML, ParseMode: parseMode(op.ParseMode), ReplyMarkup: markup,
+			msg, err := h.api.SendDocument(ctx, chatID, inputFile(*op.Source), tg.DocumentOptions{
+				CaptionOptions:              caption,
 				DisableContentTypeDetection: op.DisableContentTypeDetection,
 			})
-			return oneMessage(msg), err
+			return oneMessage(msg, err), err
 		case "media_group":
-			media := make([]models.InputMedia, 0, len(op.Media))
+			media := make([]tg.InputMedia, 0, len(op.Media))
 			for _, item := range op.Media {
 				switch item.Type {
 				case "photo":
-					media = append(media, &models.InputMediaPhoto{Media: item.Source.Value})
+					media = append(media, tg.InputMediaPhoto{Media: inputFile(item.Source)})
 				case "video":
-					media = append(media, &models.InputMediaVideo{Media: item.Source.Value, SupportsStreaming: true})
+					media = append(media, tg.InputMediaVideo{Media: inputFile(item.Source), SupportsStreaming: true})
 				case "document":
-					media = append(media, &models.InputMediaDocument{Media: item.Source.Value, DisableContentTypeDetection: true})
+					media = append(media, tg.InputMediaDocument{Media: inputFile(item.Source), DisableContentTypeDetection: true})
 				}
 			}
-			return b.SendMediaGroup(ctx, &bot.SendMediaGroupParams{ChatID: chatID, MessageThreadID: threadID, Media: media})
+			return h.api.SendMediaGroup(ctx, chatID, media, threadID)
 		case "text":
-			msg, err := b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID: chatID, MessageThreadID: threadID, Text: op.Text,
-				ParseMode: parseMode(op.ParseMode), ReplyMarkup: markup,
-				LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: ptrBool(op.DisableWebPagePreview)},
-			})
-			return oneMessage(msg), err
+			msg, err := h.api.SendTextWithPreview(ctx, chatID, threadID, op.Text,
+				&tg.LinkPreviewOptions{IsDisabled: op.DisableWebPagePreview}, markup)
+			return oneMessage(msg, err), err
 		default:
 			return nil, fmt.Errorf("operation type not validated")
 		}
 	}
 	for {
 		messages, err := send()
-		var rate *bot.TooManyRequestsError
-		if !errors.As(err, &rate) {
+		if !tg.IsTooManyRequests(err) {
 			return messages, err
 		}
-		wait := time.Duration(rate.RetryAfter) * time.Second
+		wait := tg.RetryAfter(err)
 		if wait <= 0 {
 			wait = time.Second
 		}
-		h.log.Info("Telegram rate limit", "job_id", delivery.JobID, "operation", op.OperationID, "retry_after", rate.RetryAfter)
+		h.log.Info("Telegram rate limit", "job_id", delivery.JobID, "operation", op.OperationID, "retry_after", wait.String())
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -320,44 +313,49 @@ func (h *Handlers) sendOperation(ctx context.Context, b *bot.Bot, delivery *vido
 	}
 }
 
-func inputFile(source vidobridge.Source) models.InputFile {
-	return &models.InputFileString{Data: source.Value}
-}
-
-func parseMode(value string) models.ParseMode {
-	if value == "HTML" {
-		return models.ParseModeHTML
+// inputFile turns a validated plan source into what the client sends. A
+// local_file_uri names a file in the shared cache that the local Bot API
+// server mounts too, so the server opens it instead of receiving an upload —
+// and the client refuses that against Telegram's own endpoint, where it could
+// never work, instead of letting it come back as a bad file identifier.
+func inputFile(source vidobridge.Source) tg.InputFile {
+	if source.Kind == "local_file_uri" {
+		return tg.InputFileLocal{Path: strings.TrimPrefix(source.Value, "file://")}
 	}
-	return ""
+	return tg.InputFileString{Data: source.Value}
 }
 
-func operationMarkup(buttons []vidobridge.Button) models.ReplyMarkup {
+func operationMarkup(buttons []vidobridge.Button) *tg.InlineKeyboardMarkup {
 	if len(buttons) == 0 {
-		// ReplyMarkup is an interface. Returning a typed nil pointer serializes as
-		// reply_markup=null, which the local Bot API rejects instead of omitting.
+		// A nil keyboard means "send no reply_markup at all". An empty one
+		// would serialize as reply_markup=null, which the local Bot API
+		// rejects instead of ignoring.
 		return nil
 	}
-	rows := make([][]models.InlineKeyboardButton, 0, len(buttons))
+	rows := make([][]tg.InlineKeyboardButton, 0, len(buttons))
 	for _, button := range buttons {
-		item := models.InlineKeyboardButton{Text: button.Text}
+		item := tg.InlineKeyboardButton{Text: button.Text}
 		if button.Type == "audio" {
 			item.CallbackData = audioCallbackPrefix + button.Token
 		} else {
 			item.URL = button.URL
 		}
-		rows = append(rows, []models.InlineKeyboardButton{item})
+		rows = append(rows, []tg.InlineKeyboardButton{item})
 	}
-	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	return &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func oneMessage(message *models.Message) []*models.Message {
-	if message == nil {
+// oneMessage wraps a single send's result. A failed send hands back a zero
+// Message, which must never be read as a delivered one when the caller goes
+// looking for a file_id in it.
+func oneMessage(message tg.Message, err error) []tg.Message {
+	if err != nil || message.MessageID == 0 {
 		return nil
 	}
-	return []*models.Message{message}
+	return []tg.Message{message}
 }
 
-func operationFileRefs(op vidobridge.Operation, messages []*models.Message) []vidobridge.FileRef {
+func operationFileRefs(op vidobridge.Operation, messages []tg.Message) []vidobridge.FileRef {
 	refs := make([]vidobridge.FileRef, 0, len(messages))
 	if op.Type == "media_group" {
 		for i, message := range messages {
@@ -378,8 +376,8 @@ func operationFileRefs(op vidobridge.Operation, messages []*models.Message) []vi
 	return refs
 }
 
-func messageFileRef(source vidobridge.Source, kind string, message *models.Message) (vidobridge.FileRef, bool) {
-	if source.Kind != "local_file_uri" || source.ContentKey == "" || source.VariantKey == "" || message == nil {
+func messageFileRef(source vidobridge.Source, kind string, message tg.Message) (vidobridge.FileRef, bool) {
+	if source.Kind != "local_file_uri" || source.ContentKey == "" || source.VariantKey == "" {
 		return vidobridge.FileRef{}, false
 	}
 	ref := vidobridge.FileRef{ContentKey: source.ContentKey, VariantKey: source.VariantKey, SendKind: kind, ItemIndex: source.ItemIndex}
@@ -405,7 +403,7 @@ func messageFileRef(source vidobridge.Source, kind string, message *models.Messa
 }
 
 func invalidFileIDSources(op vidobridge.Operation, err error) []string {
-	if err == nil || !errors.Is(err, bot.ErrorBadRequest) {
+	if !badRequest(err) {
 		return nil
 	}
 	text := strings.ToLower(err.Error())
@@ -424,7 +422,23 @@ func invalidFileIDSources(op vidobridge.Operation, err error) []string {
 	return values
 }
 
+// telegramDefiniteFailure reports an answer that says the send did not happen
+// and would not happen on a retry either. Anything else — a dropped
+// connection, a 5xx, a timeout — may still have been delivered, and the job has
+// to be recorded as delivery_unknown rather than failed.
 func telegramDefiniteFailure(err error) bool {
-	return errors.Is(err, bot.ErrorBadRequest) || errors.Is(err, bot.ErrorForbidden) ||
-		errors.Is(err, bot.ErrorUnauthorized) || errors.Is(err, bot.ErrorNotFound)
+	var apiErr *tg.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.HTTPStatus() {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return false
+}
+
+func badRequest(err error) bool {
+	var apiErr *tg.APIError
+	return errors.As(err, &apiErr) && apiErr.HTTPStatus() == http.StatusBadRequest
 }

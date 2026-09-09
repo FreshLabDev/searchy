@@ -1,10 +1,6 @@
-github.com/FreshLabDev/tg v0.0.1-alpha.7 h1:rd0Z5iAUvGlXIe/EpjZCc+Z5UO+cwHmgLI15UzWjVDc=
-github.com/FreshLabDev/tg v0.0.1-alpha.7/go.mod h1:wsFn10qoSGmL5G1kkEQCxKG3N2BEqnry0yU1CrNwvrI=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/go-telegram/bot v1.25.0 h1:C072msZtr+GjJiQsX/UJLirz+jzSNZVWkckxWufR7Ww=
-github.com/go-telegram/bot v1.25.0/go.mod h1:i2TRs7fXWIeaceF3z7KzsMt/he0TwkVC680mvdTFYeM=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
