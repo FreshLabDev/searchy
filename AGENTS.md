@@ -3,9 +3,11 @@
 This file is for coding agents working on Searchy. Keep the project minimal,
 private by design, and production-minded.
 
-- Telegram startup -- getMe, deleteWebhook, the readiness wait and the
-  capability preflight -- goes through `github.com/FreshLabDev/tg`. Polling and
-  handlers stay on `go-telegram/bot`. Do not add a private HTTP client back.
+- All Telegram traffic goes through `github.com/FreshLabDev/tg` — startup
+  (getMe, deleteWebhook, the readiness wait, the capability preflight), the
+  poll loop, and every send. There is no second Telegram library and no
+  private HTTP client; a method the module lacks goes through `tg.Call` or
+  lands in the module.
 
 ## Project Shape
 
@@ -88,9 +90,11 @@ private by design, and production-minded.
 
 ## Versioning
 
-- Two branches: work on `dev` (development), publish releases from `main`. The
-  `## Unreleased` changelog section tracks what has merged to `dev` but not yet
-  shipped. See `docs/versioning.md`.
+- Work on `dev`. Pre-releases (`-alpha.N`, `-beta.N`, `-rc.N`) are tagged on
+  `dev`; stable versions are tagged on `main`, on the merge commit from `dev`.
+  The test bot runs `dev`, the production bot runs `main`.
+  The `## Unreleased` changelog section tracks what has merged to `dev` but is
+  not yet tagged. See `docs/versioning.md`.
 - Follow `docs/versioning.md` for release tags.
 - Keep the first release line as `v0.1.0-alpha.1`, `v0.1.0-beta.1`,
   `v0.1.0-rc.1`, then `v0.1.0`.
@@ -153,3 +157,18 @@ docker compose -f deploy/docker-compose.yml config
 
 Searchy is licensed under Apache-2.0. Preserve the root `LICENSE` and `NOTICE`
 files and keep public documentation consistent with that license.
+
+## Deploying
+
+Do not invent a deploy. [`docs/releases.md`](docs/releases.md) has a **Deploying**
+section describing this stack exactly: which host directory it lives in, which
+env file names the image, which networks it needs, and how to roll back. Read it
+before touching anything on the host.
+
+Two rules that hold everywhere and are easy to get wrong:
+
+- **Nothing is built on the host.** A production stack pulls the image the
+  release workflow published. A `build:` section in a production manifest is a
+  bug.
+- **Pin the digest, not the tag.** A tag moves; a digest names one build that was
+  tested, and a rollback becomes one line with nothing to rebuild.

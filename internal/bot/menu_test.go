@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/FreshLabDev/tg"
+
 	"searchy/internal/buildinfo"
 	"searchy/internal/i18n"
 )
@@ -29,7 +31,7 @@ func TestAboutPanelShowsOneVersionPrefixInEveryLocale(t *testing.T) {
 	t.Cleanup(func() { buildinfo.Version = previousVersion })
 
 	for _, language := range i18n.LANGUAGE_OPTIONS {
-		text, _ := aboutBody(language.Code, 1)
+		text, _ := aboutPanel(language.Code, 1, false)
 		if strings.Contains(text, "vv0.1.0-beta.3") {
 			t.Fatalf("locale %s rendered a duplicated version prefix: %q", language.Code, text)
 		}
@@ -37,4 +39,194 @@ func TestAboutPanelShowsOneVersionPrefixInEveryLocale(t *testing.T) {
 			t.Fatalf("locale %s omitted the version prefix: %q", language.Code, text)
 		}
 	}
+}
+
+// The build date used to be passed to a string that never referenced it, so
+// nobody could tell a CI build from a laptop one by looking at the panel.
+func TestAboutPanelShowsTheBuildDate(t *testing.T) {
+	previousDate := buildinfo.Date
+	buildinfo.Date = "2026-09-09T12:00:00Z"
+	t.Cleanup(func() { buildinfo.Date = previousDate })
+
+	for _, language := range i18n.LANGUAGE_OPTIONS {
+		text, _ := aboutPanel(language.Code, 1, false)
+		if !strings.Contains(text, "2026-09-09T12:00:00Z") {
+			t.Fatalf("locale %s omitted the build date: %q", language.Code, text)
+		}
+	}
+}
+
+// The repository is a link inside the text. A button for it as well would be
+// two controls for one action.
+func TestAboutPanelLinksTheRepositoryInTextAndNotAsAButton(t *testing.T) {
+	text, kb := aboutPanel("ru", 1, false)
+	if !strings.Contains(text, `<a href="https://github.com/FreshLabDev/searchy">`) {
+		t.Fatalf("about text has no repository link: %q", text)
+	}
+	if !strings.Contains(text, "Apache-2.0") {
+		t.Fatalf("about text does not name the license: %q", text)
+	}
+	for _, row := range kb.InlineKeyboard {
+		for _, button := range row {
+			if strings.Contains(button.URL, "github.com") {
+				t.Fatalf("a source button duplicates the link already in the text: %q", button.Text)
+			}
+		}
+	}
+}
+
+// Every value on an About line has to be translated, or a Russian panel reads
+// half in English.
+func TestAboutPanelIsFullyLocalized(t *testing.T) {
+	english, _ := aboutPanel("en", 1, false)
+	for _, language := range i18n.LANGUAGE_OPTIONS {
+		if language.Code == i18n.DefaultLang {
+			continue
+		}
+		text, _ := aboutPanel(language.Code, 1, false)
+		for _, key := range []string{"about.tagline", "about.field.search", "about.value.search",
+			"about.field.build", "about.field.source", "about.field.admin"} {
+			localized := i18n.T(language.Code, key)
+			if localized == "" {
+				t.Fatalf("%s has no %s", language.Code, key)
+			}
+			if !strings.Contains(text, localized) {
+				t.Fatalf("%s panel is missing %s (%q)", language.Code, key, localized)
+			}
+			if localized == i18n.T(i18n.DefaultLang, key) && language.Code != "en" {
+				// Shared proper nouns are fine; a whole English sentence is not.
+				if strings.Count(localized, " ") > 1 {
+					t.Fatalf("%s falls back to the English %s: %q", language.Code, key, localized)
+				}
+			}
+		}
+		if text == english {
+			t.Fatalf("%s panel is identical to the English one", language.Code)
+		}
+	}
+}
+
+// A DM is the panel: there is nothing else in the chat, so Close offers to
+// delete the only thing on screen. A group panel is one person's menu in
+// everyone's feed, and there it is not optional.
+func TestCloseExistsOnlyInGroups(t *testing.T) {
+	panels := map[string]func(bool) *tg.InlineKeyboardMarkup{
+		"home": func(inGroup bool) *tg.InlineKeyboardMarkup {
+			_, kb := homePanel("en", "searchybot", "vidobot", 1, inGroup)
+			return kb
+		},
+		"help": func(inGroup bool) *tg.InlineKeyboardMarkup {
+			_, kb := infoPanel("en", 1, inGroup, "help.title", "help.body", "bot", "searchybot")
+			return kb
+		},
+		"about": func(inGroup bool) *tg.InlineKeyboardMarkup {
+			_, kb := aboutPanel("en", 1, inGroup)
+			return kb
+		},
+		"language": func(inGroup bool) *tg.InlineKeyboardMarkup {
+			_, kb := languagePanel("en", 1, inGroup)
+			return kb
+		},
+	}
+	for name, build := range panels {
+		if hasCallback(build(false), "m:1:close") {
+			t.Errorf("%s panel offers Close in a DM, where there is nothing to close", name)
+		}
+		if !hasCallback(build(true), "m:1:close") {
+			t.Errorf("%s panel has no Close in a group, where the panel is everyone's clutter", name)
+		}
+	}
+}
+
+// A group /start is a different screen, not the personal one with a Close
+// bolted on: language and personal statistics belong in a DM.
+func TestGroupHomeOffersSearchAndADMInsteadOfPersonalSettings(t *testing.T) {
+	_, group := homePanel("en", "searchybot", "vidobot", 1, true)
+	if hasCallback(group, "m:1:language") || hasCallback(group, "m:1:statsp") {
+		t.Fatal("the group panel puts one member's personal settings in everyone's feed")
+	}
+	var hasInlineSearch, hasDM bool
+	for _, row := range group.InlineKeyboard {
+		for _, button := range row {
+			if button.SwitchInlineQueryCurrentChat != nil {
+				hasInlineSearch = true
+			}
+			if button.URL == "https://t.me/searchybot" {
+				hasDM = true
+			}
+		}
+	}
+	if !hasInlineSearch {
+		t.Error("the group panel has no way to search")
+	}
+	if !hasDM {
+		t.Error("the group panel does not point at the DM for personal settings")
+	}
+
+	_, personal := homePanel("en", "searchybot", "vidobot", 1, false)
+	if !hasCallback(personal, "m:1:language") || !hasCallback(personal, "m:1:statsp") {
+		t.Fatal("the DM panel lost language or statistics")
+	}
+}
+
+// Emoji mark state — the selected language, the active tab — and nothing else.
+// A picture on every button is decoration that stops meaning anything.
+func TestButtonsAndHeadingsCarryNoDecorativeEmoji(t *testing.T) {
+	keys := []string{
+		"home.title", "btn.language", "btn.stats", "btn.help", "btn.about",
+		"btn.search", "btn.download", "btn.video_settings", "btn.open_dm",
+		"btn.open_platform", "btn.open_original", "action.back", "action.close",
+		"language.title", "help.title", "stats.title.personal", "stats.title.global",
+		"download.retry_button",
+	}
+	for _, language := range i18n.LANGUAGE_OPTIONS {
+		for _, key := range keys {
+			value := i18n.T(language.Code, key)
+			for _, r := range value {
+				if isDecorativeSymbol(r) {
+					t.Errorf("%s/%s carries %q: %q", language.Code, key, string(r), value)
+					break
+				}
+			}
+		}
+	}
+}
+
+// The selection and tab marks are the deliberate exception, and they must
+// survive the sweep.
+func TestStateMarksSurvive(t *testing.T) {
+	if curMark(true) != "◉ " || curMark(false) != "" {
+		t.Fatal("the language picker lost its selection mark")
+	}
+	if tabMark(true) != "◉ " || tabMark(false) != "◎ " {
+		t.Fatal("the stats panel lost its tab marks")
+	}
+}
+
+func hasCallback(kb *tg.InlineKeyboardMarkup, data string) bool {
+	for _, row := range kb.InlineKeyboard {
+		for _, button := range row {
+			if button.CallbackData == data {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isDecorativeSymbol covers the pictograph, dingbat and arrow blocks a label
+// would use as an icon. It deliberately excludes the geometric shapes ◉ and ◎,
+// which are the state marks.
+func isDecorativeSymbol(r rune) bool {
+	switch {
+	case r >= 0x1F300 && r <= 0x1FAFF: // emoji and pictographs
+		return true
+	case r >= 0x2190 && r <= 0x21FF: // arrows
+		return true
+	case r >= 0x2600 && r <= 0x27BF: // dingbats, misc symbols
+		return true
+	case r == 0x2139 || r == 0xFE0F: // ℹ and the emoji variation selector
+		return true
+	}
+	return false
 }

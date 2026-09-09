@@ -1,17 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
 # Searchy production stack on WS04. Identity, language and analytics use the
 # shared core-postgres through least-privilege URLs from .env.
+#
+# The image is pulled, never built here. A stack that builds from a working
+# copy on the host runs whatever that copy happened to contain, which is not
+# necessarily what CI tested, scanned and published -- and afterwards nothing
+# on the host can say which commit it was. The build args this stack used to
+# pass (SEARCHY_VERSION / SEARCHY_COMMIT / SEARCHY_BUILD_DATE) were maintained
+# by hand in .env for exactly that reason; the release workflow now bakes the
+# real ones into the image. SEARCHY_IMAGE must name an immutable GHCR
+# reference, digest for preference:
+#
+#   SEARCHY_IMAGE=ghcr.io/freshlabdev/searchy@sha256:<digest>
+#
+# A tag is accepted but a digest is what makes a rollback exact.
 name: searchy
 
 services:
   bot:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
-      args:
-        VERSION: ${SEARCHY_VERSION:-dev}
-        COMMIT: ${SEARCHY_COMMIT:-none}
-        DATE: ${SEARCHY_BUILD_DATE:-unknown}
-    image: searchy-bot:${SEARCHY_IMAGE_TAG:-local}
+    image: ${SEARCHY_IMAGE:?SEARCHY_IMAGE must be an immutable GHCR reference}
     container_name: searchy-bot
     env_file:
       - ./.env

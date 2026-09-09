@@ -8,8 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
+	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/i18n"
 	"searchy/internal/search"
@@ -36,7 +35,7 @@ func parseDownloadCB(data string) (token, kind string, ok bool) {
 	return token, kind, len(token) == 32
 }
 
-func (h *Handlers) inlineDownloadURLs(ctx context.Context, user *models.User, results []search.MediaResult) map[string]string {
+func (h *Handlers) inlineDownloadURLs(ctx context.Context, user *tg.User, results []search.MediaResult) map[string]string {
 	if h.vido == nil || !h.vido.Ready() || h.vidoBotUsername == "" || user == nil {
 		return nil
 	}
@@ -85,7 +84,7 @@ func (h *Handlers) inlineDownloadURLs(ctx context.Context, user *models.User, re
 	return urls
 }
 
-func (h *Handlers) mintChatDownload(ctx context.Context, user *models.User, result search.MediaResult, chatID int64) (string, error) {
+func (h *Handlers) mintChatDownload(ctx context.Context, user *tg.User, result search.MediaResult, chatID int64) (string, error) {
 	if h.vido == nil || !h.vido.Ready() || user == nil || result.PageURL == "" {
 		return "", errors.New("vido bridge unavailable")
 	}
@@ -106,17 +105,17 @@ func (h *Handlers) mintChatDownload(ctx context.Context, user *models.User, resu
 	})
 }
 
-func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *models.CallbackQuery, token, kind string) {
+func (h *Handlers) onDownloadCallback(ctx context.Context, cq *tg.CallbackQuery, token, kind string) {
 	lang := h.langCached(&cq.From)
 	if h.vido == nil || !h.vido.Ready() {
-		h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.unavailable"), true)
+		h.answerCB(ctx, cq.ID, i18n.T(lang, "download.unavailable"), true)
 		return
 	}
-	if cq.Message.Message == nil {
-		h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.expired"), true)
+	if cq.Message.MessageID == 0 {
+		h.answerCB(ctx, cq.ID, i18n.T(lang, "download.expired"), true)
 		return
 	}
-	msg := cq.Message.Message
+	msg := &cq.Message
 	enqueue := h.vido.Enqueue
 	if kind == "retry" {
 		enqueue = h.vido.EnqueueRetry
@@ -128,7 +127,7 @@ func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *model
 		ActorID:    cq.From.ID,
 		ChatID:     msg.Chat.ID,
 		ThreadID:   msg.MessageThreadID,
-		MessageID:  msg.ID,
+		MessageID:  int(msg.MessageID),
 		RequestKey: kind + ":" + cq.ID,
 	})
 	if err != nil {
@@ -146,33 +145,28 @@ func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *model
 						LanguageCode: cq.From.LanguageCode,
 					},
 					ChatID:    msg.Chat.ID,
-					MessageID: msg.ID,
+					MessageID: int(msg.MessageID),
 				},
 			)
 			if sharedErr == nil {
-				h.answerCBURL(
-					ctx,
-					b,
-					cq.ID,
-					vidobridge.DeepLink(h.vidoBotUsername, sharedToken),
-				)
+				h.answerCBURL(ctx, cq.ID, vidobridge.DeepLink(h.vidoBotUsername, sharedToken))
 				return
 			}
 			if errors.Is(sharedErr, vidobridge.ErrExpired) {
-				h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.expired"), true)
+				h.answerCB(ctx, cq.ID, i18n.T(lang, "download.expired"), true)
 				return
 			}
 			if !errors.Is(sharedErr, vidobridge.ErrWrongContext) {
 				h.log.Warn("mint shared vido intent failed", "err", sharedErr)
 			}
-			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.notyours"), true)
+			h.answerCB(ctx, cq.ID, i18n.T(lang, "download.notyours"), true)
 		case errors.Is(err, vidobridge.ErrNotOwner), errors.Is(err, vidobridge.ErrWrongContext):
-			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.notyours"), true)
+			h.answerCB(ctx, cq.ID, i18n.T(lang, "download.notyours"), true)
 		case errors.Is(err, vidobridge.ErrExpired):
-			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.expired"), true)
+			h.answerCB(ctx, cq.ID, i18n.T(lang, "download.expired"), true)
 		default:
 			h.log.Warn("enqueue vido job failed", "err", err)
-			h.answerCB(ctx, b, cq.ID, i18n.T(lang, "download.unavailable"), true)
+			h.answerCB(ctx, cq.ID, i18n.T(lang, "download.unavailable"), true)
 		}
 		return
 	}
@@ -181,7 +175,7 @@ func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *model
 		current, stageErr := h.vido.JobStage(stageCtx, state.JobID)
 		stageCancel()
 		if stageErr == nil && current.MessageKey != "" {
-			h.answerCB(ctx, b, cq.ID, i18n.T(lang, searchyDownloadErrorKey(current.MessageKey)), true)
+			h.answerCB(ctx, cq.ID, i18n.T(lang, searchyDownloadErrorKey(current.MessageKey)), true)
 			return
 		}
 	}
@@ -189,11 +183,11 @@ func (h *Handlers) onDownloadCallback(ctx context.Context, b *bot.Bot, cq *model
 	if state.Status != "queued" {
 		text = i18n.T(lang, "download.in_progress")
 	}
-	h.answerCB(ctx, b, cq.ID, text, false)
-	h.watchDownload(b, state.JobID, msg.Chat.ID, msg.MessageThreadID, msg.ID, token, &cq.From)
+	h.answerCB(ctx, cq.ID, text, false)
+	h.watchDownload(state.JobID, msg.Chat.ID, msg.MessageThreadID, int(msg.MessageID), token, &cq.From)
 }
 
-func (h *Handlers) watchDownload(b *bot.Bot, jobID, chatID int64, threadID, originMessageID int, token string, user *models.User) {
+func (h *Handlers) watchDownload(jobID, chatID int64, threadID, originMessageID int, token string, user *tg.User) {
 	if _, loaded := h.jobWatch.LoadOrStore(jobID, struct{}{}); loaded {
 		return
 	}
@@ -222,11 +216,7 @@ func (h *Handlers) watchDownload(b *bot.Bot, jobID, chatID int64, threadID, orig
 			case "delivered":
 				return
 			}
-			_, _ = b.SendChatAction(ctx, &bot.SendChatActionParams{
-				ChatID:          chatID,
-				MessageThreadID: threadID,
-				Action:          stageChatAction(state.ActivityStage),
-			})
+			_ = h.api.SendChatAction(ctx, chatID, threadID, stageChatAction(state.ActivityStage))
 			select {
 			case <-ctx.Done():
 				return
@@ -263,16 +253,16 @@ func searchyDownloadErrorKey(vidoKey string) string {
 	}
 }
 
-func stageChatAction(stage string) models.ChatAction {
+func stageChatAction(stage string) string {
 	switch stage {
 	case "uploading_photo":
-		return models.ChatActionUploadPhoto
+		return tg.ChatActionUploadPhoto
 	case "uploading_audio":
-		return models.ChatActionUploadVoice
+		return tg.ChatActionUploadVoice
 	case "uploading_document":
-		return models.ChatActionUploadDocument
+		return tg.ChatActionUploadDocument
 	default:
-		return models.ChatActionUploadVideo
+		return tg.ChatActionUploadVideo
 	}
 }
 

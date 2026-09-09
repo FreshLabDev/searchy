@@ -136,7 +136,7 @@ Searchy is one Go service that long-polls Telegram and calls a self-hosted
 SearXNG over HTTP.
 
 ```text
-Telegram ──update──► bot (go-telegram/bot, long polling)
+Telegram ──update──► bot (FreshLabDev/tg, long polling)
                        │
           inline_query │ debounce(per user) → cancel stale
                        ▼
@@ -280,6 +280,6 @@ docker compose -f deploy/docker-compose.yml config
 </p>
 
 <p align="center">
-  Searchy is open source software by FreshLab.<br/>
-  Copyright 2026 FreshLab.
+  Searchy is open source software by Asterfield.<br/>
+  Copyright 2026 Asterfield.
 </p>

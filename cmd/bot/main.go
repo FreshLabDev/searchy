@@ -20,8 +20,6 @@ import (
 	"time"
 
 	"github.com/FreshLabDev/tg"
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 
 	bothandlers "searchy/internal/bot"
 	"searchy/internal/buildinfo"
@@ -35,11 +33,11 @@ import (
 	vidobridge "searchy/internal/vido"
 )
 
-const (
-	telegramStartupTimeout      = 2 * time.Minute
-	telegramStartupInitialDelay = time.Second
-	telegramStartupMaxDelay     = 5 * time.Second
-)
+// telegramStartupTimeout bounds the whole readiness check. The Bot API server
+// shares a lifecycle with the bot and often loses the race by a few seconds,
+// so tg.Preflight retries getMe within this budget rather than failing on the
+// first refused connection.
+const telegramStartupTimeout = 2 * time.Minute
 
 func main() {
 	healthcheck := flag.Bool("healthcheck", false, "probe the local /healthz endpoint and exit (for container healthchecks)")
@@ -120,8 +118,25 @@ func main() {
 		}
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// One Telegram client for the whole process: it is safe for concurrent use,
+	// and the update workers share its connection pool.
+	telegramHTTP := &http.Client{Timeout: 10 * time.Minute}
+	api := tg.New(cfg.BotToken,
+		tg.WithAPIBase(cfg.TelegramBotAPIBaseURL),
+		tg.WithHTTPClient(telegramHTTP),
+		tg.WithLogger(logger),
+		// Telegram's own default omits update kinds a bot has to ask for, and
+		// searchy lives on two of these: inline_query is its primary surface and
+		// chosen_inline_result is the only way to learn what was sent.
+		tg.WithAllowedUpdates("inline_query", "chosen_inline_result", "message", "callback_query"),
+	)
+
 	handlers := bothandlers.NewHandlers(bothandlers.Options{
 		Aggregator:      agg,
+		Telegram:        api,
 		Logger:          logger,
 		HTTPClient:      client,
 		Store:           store,
@@ -131,52 +146,19 @@ func main() {
 		SharedCacheRoot: cfg.SharedMediaCacheDir,
 		MaxResults:      cfg.MaxResults,
 		InlineCacheTime: cfg.InlineCacheTime,
+		Workers:         cfg.Workers,
 		DebounceDelay:   cfg.DebounceDelay,
 		RequestTimeout:  cfg.RequestTimeout,
 		StatsCacheTTL:   cfg.StatsCacheTTL,
 	})
 
-	opts := []bot.Option{
-		bot.WithDefaultHandler(handlers.Route),
-		bot.WithWorkers(cfg.Workers),
-		// go-telegram/bot sends an unterminated multipart body for parameterless
-		// calls. Telegram's cloud endpoint tolerates it, but the local Bot API
-		// returns an empty response. Validate the token with telegramGetMe below.
-		bot.WithSkipGetMe(),
-		bot.WithAllowedUpdates(bot.AllowedUpdates{"inline_query", "chosen_inline_result", "message", "callback_query"}),
-		bot.WithErrorsHandler(func(err error) {
-			logger.Warn("bot error", "err", err)
-		}),
-	}
-	telegramClient := &http.Client{Timeout: 10 * time.Minute}
-	opts = append(opts, bot.WithHTTPClient(time.Minute, telegramClient))
-	if cfg.TelegramBotAPIBaseURL != "" {
-		opts = append(opts, bot.WithServerURL(cfg.TelegramBotAPIBaseURL))
-	}
-
-	b, err := bot.New(cfg.BotToken, opts...)
-	if err != nil {
-		logger.Error("bot init", "err", err)
-		os.Exit(1)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	// Identify ourselves (for inline prompts and the /start text) and make sure no
 	// webhook is set (a webhook + getUpdates would 409). GetMe is the token check:
 	// fail fast and loud rather than running on with an empty username (which would
 	// render "{bot}" prompts as a dangling "@" for the whole process life).
-	api := tg.New(cfg.BotToken,
-		tg.WithAPIBase(cfg.TelegramBotAPIBaseURL),
-		tg.WithHTTPClient(telegramClient),
-		tg.WithLogger(logger),
-	)
 	startupCtx, cancel := context.WithTimeout(ctx, telegramStartupTimeout)
 	me, err := api.Preflight(startupCtx, tg.Needs{
-		// Searchy is an inline bot that answers with pictures. A server that
-		// cannot do either would leave it polling and never answering.
-		Methods: []string{"answerInlineQuery", "sendPhoto"},
+		Methods: requiredMethods(cfg.VidoBridgeEnabled),
 		Wait:    telegramStartupTimeout,
 	})
 	cancel()
@@ -197,9 +179,9 @@ func main() {
 	webhookCancel()
 	// Command menus are localized per language (16 × 2 scopes); register them off
 	// the critical path so the handful of setMyCommands calls don't delay polling.
-	go registerCommands(ctx, b, logger)
-	go handlers.RunDeliveryWorker(ctx, b)
-	go handlers.RunNotificationWorker(ctx, b)
+	go registerCommands(ctx, api, logger)
+	go handlers.RunDeliveryWorker(ctx)
+	go handlers.RunNotificationWorker(ctx)
 
 	// Health endpoint for container orchestration.
 	healthSrv := startHealthServer(logger, cfg.VidoBridgeEnabled, bridge)
@@ -211,8 +193,34 @@ func main() {
 
 	logger.Info("starting", "version", buildinfo.Version, "commit", buildinfo.Commit, "built", buildinfo.Date,
 		"searxng", cfg.SearxngURL, "workers", cfg.Workers, "cache_ttl", cfg.CacheTTL.String())
-	b.Start(ctx) // blocks until ctx is cancelled (SIGINT/SIGTERM)
+	if err := handlers.Run(ctx); err != nil { // blocks until ctx is cancelled (SIGINT/SIGTERM)
+		logger.Error("polling stopped", "err", err)
+	}
 	logger.Info("shutdown complete")
+}
+
+// requiredMethods lists what searchy genuinely cannot work without, so a Bot
+// API server too old to serve it refuses the start instead of letting the bot
+// poll happily and answer nothing.
+//
+// The media sends below are only reachable through the Vido bridge, so they
+// are required only when it is on: a searchy running without the bridge should
+// not refuse to start over a delivery path it will never take.
+func requiredMethods(vidoBridge bool) []string {
+	methods := []string{
+		"answerInlineQuery",      // the primary surface
+		"answerCallbackQuery",    // every button in every panel
+		"deleteMessage",          // Close
+		"editMessageMedia",       // paging the result grid in place
+		"editMessageReplyMarkup", // retracting a download action that did not bind
+		"editMessageText",        // menu navigation
+		"sendMessage",            // panels and errors
+		"sendPhoto",              // the result grid and single picks
+	}
+	if vidoBridge {
+		methods = append(methods, "sendVideo", "sendAudio", "sendDocument", "sendMediaGroup")
+	}
+	return methods
 }
 
 // registerCommands publishes a minimal command list: private chats see only
@@ -220,26 +228,26 @@ func main() {
 // reachable from the in-chat menu buttons, so it's intentionally not listed.
 // Descriptions are localized per language (language_code), with an English
 // default for clients on any other language.
-func registerCommands(ctx context.Context, b *bot.Bot, logger *slog.Logger) {
+func registerCommands(ctx context.Context, api *tg.Client, logger *slog.Logger) {
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	set := func(scope models.BotCommandScope, lang string, cmds []models.BotCommand) {
-		if _, err := b.SetMyCommands(cctx, &bot.SetMyCommandsParams{Commands: cmds, Scope: scope, LanguageCode: lang}); err != nil {
-			logger.Warn("setMyCommands", "lang", lang, "err", err)
+	set := func(scope, lang string, cmds []tg.BotCommand) {
+		if err := api.SetMyCommandsForScope(cctx, cmds, &tg.BotCommandScope{Type: scope, LanguageCode: lang}); err != nil {
+			logger.Warn("setMyCommands", "scope", scope, "lang", lang, "err", err)
 		}
 	}
-	commands := func(lang string) (private, group []models.BotCommand) {
-		start := models.BotCommand{Command: "start", Description: i18n.T(lang, "cmd.start")}
-		return []models.BotCommand{start},
-			[]models.BotCommand{start, {Command: "search", Description: i18n.T(lang, "cmd.search")}}
+	commands := func(lang string) (private, group []tg.BotCommand) {
+		start := tg.BotCommand{Command: "start", Description: i18n.T(lang, "cmd.start")}
+		return []tg.BotCommand{start},
+			[]tg.BotCommand{start, {Command: "search", Description: i18n.T(lang, "cmd.search")}}
 	}
 
 	// English default (language_code=""), applied where no localized list matches.
 	p, g := commands(i18n.DefaultLang)
-	set(&models.BotCommandScopeDefault{}, "", p)
-	set(&models.BotCommandScopeAllPrivateChats{}, "", p)
-	set(&models.BotCommandScopeAllGroupChats{}, "", g)
+	set("default", "", p)
+	set("all_private_chats", "", p)
+	set("all_group_chats", "", g)
 
 	// Localized overrides per supported language.
 	for _, opt := range i18n.LANGUAGE_OPTIONS {
@@ -247,8 +255,8 @@ func registerCommands(ctx context.Context, b *bot.Bot, logger *slog.Logger) {
 			continue
 		}
 		p, g := commands(opt.Code)
-		set(&models.BotCommandScopeAllPrivateChats{}, opt.Code, p)
-		set(&models.BotCommandScopeAllGroupChats{}, opt.Code, g)
+		set("all_private_chats", opt.Code, p)
+		set("all_group_chats", opt.Code, g)
 	}
 }
 

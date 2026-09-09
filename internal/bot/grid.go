@@ -10,8 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
+	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/collage"
 	"searchy/internal/i18n"
@@ -75,7 +74,7 @@ func parseGridCB(data string) (tok, action string, arg int, ok bool) {
 // both DM and groups; `source` is "dm" or "group" for analytics only. threadID
 // is the forum topic the request came from (0 outside topic groups), so replies
 // land in the right place.
-func (h *Handlers) runGridSearch(ctx context.Context, b *bot.Bot, chatID int64, threadID int, user *models.User, raw, source string) {
+func (h *Handlers) runGridSearch(ctx context.Context, chatID int64, threadID int, user *tg.User, raw, source string) {
 	lang := h.langResolve(ctx, user)
 	cats, q := parseQuery(raw)
 	if strings.TrimSpace(q) == "" {
@@ -83,7 +82,7 @@ func (h *Handlers) runGridSearch(ctx context.Context, b *bot.Bot, chatID int64, 
 	}
 
 	// Tell the chat we're working ("…is sending a photo").
-	_, _ = b.SendChatAction(ctx, &bot.SendChatActionParams{ChatID: chatID, MessageThreadID: threadID, Action: models.ChatActionUploadPhoto})
+	_ = h.api.SendChatAction(ctx, chatID, threadID, tg.ChatActionUploadPhoto)
 
 	sctx, cancel := context.WithTimeout(ctx, h.requestTimeout)
 	start := time.Now()
@@ -92,34 +91,33 @@ func (h *Handlers) runGridSearch(ctx context.Context, b *bot.Bot, chatID int64, 
 	h.recordSearch(user, categoryStr(cats), len(results), int(time.Since(start).Milliseconds()), source)
 
 	if len(results) == 0 {
-		h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "search.nothing", "query", escapeHTML(q)))
+		h.replyRetry(ctx, chatID, threadID, lang, i18n.T(lang, "search.nothing", "query", escapeHTML(q)))
 		return
 	}
 
 	tok := newToken()
 	h.grids.Add(tok, &gridSession{results: results, lang: lang})
-	h.sendGridPage(ctx, b, chatID, threadID, tok, 0)
+	h.sendGridPage(ctx, chatID, threadID, tok, 0)
 }
 
 // sendGridPage renders page `page` of a session and posts it as a NEW photo.
-func (h *Handlers) sendGridPage(ctx context.Context, b *bot.Bot, chatID int64, threadID int, tok string, page int) {
+func (h *Handlers) sendGridPage(ctx context.Context, chatID int64, threadID int, tok string, page int) {
 	sess, ok := h.grids.Get(tok)
 	if !ok {
 		return
 	}
-	img, ok := h.renderGrid(ctx, b, chatID, threadID, sess, page)
+	img, ok := h.renderGrid(ctx, chatID, threadID, sess, page)
 	if !ok {
-		h.replyRetry(ctx, b, chatID, threadID, sess.lang, i18n.T(sess.lang, "load.failed"))
+		h.replyRetry(ctx, chatID, threadID, sess.lang, i18n.T(sess.lang, "load.failed"))
 		return
 	}
-	_, err := b.SendPhoto(ctx, &bot.SendPhotoParams{
-		ChatID:          chatID,
-		MessageThreadID: threadID,
-		Photo:           &models.InputFileUpload{Filename: "results.jpg", Data: bytes.NewReader(img)},
-		Caption:         gridCaption(sess.lang, page, len(sess.results)),
-		ParseMode:       models.ParseModeHTML,
-		ReplyMarkup:     gridKeyboard(sess.lang, tok, page, len(sess.results)),
-	})
+	_, err := h.api.SendPhoto(ctx, chatID,
+		tg.InputFileUpload{Filename: "results.jpg", Data: bytes.NewReader(img)},
+		tg.CaptionOptions{
+			ThreadID: threadID,
+			Caption:  gridCaption(sess.lang, page, len(sess.results)),
+			Markup:   gridKeyboard(sess.lang, tok, page, len(sess.results)),
+		})
 	if err != nil {
 		h.log.Warn("sendPhoto (grid) failed", "err", err)
 	}
@@ -128,37 +126,29 @@ func (h *Handlers) sendGridPage(ctx context.Context, b *bot.Bot, chatID int64, t
 // editGridPage re-renders a different page and swaps it into the existing photo
 // message in place (used by the ◀ / Next buttons). EditMessageMedia inherits the
 // original message's topic, so only the in-flight chat action needs threadID.
-func (h *Handlers) editGridPage(ctx context.Context, b *bot.Bot, chatID int64, msgID, threadID int, tok string, page int) {
+func (h *Handlers) editGridPage(ctx context.Context, chatID, msgID int64, threadID int, tok string, page int) {
 	sess, ok := h.grids.Get(tok)
 	if !ok {
 		return
 	}
-	img, ok := h.renderGrid(ctx, b, chatID, threadID, sess, page)
+	img, ok := h.renderGrid(ctx, chatID, threadID, sess, page)
 	if !ok {
 		return
 	}
-	_, err := b.EditMessageMedia(ctx, &bot.EditMessageMediaParams{
-		ChatID:    chatID,
-		MessageID: msgID,
-		Media: &models.InputMediaPhoto{
-			Media:           "attach://grid.jpg",
-			MediaAttachment: bytes.NewReader(img),
-			Caption:         gridCaption(sess.lang, page, len(sess.results)),
-			ParseMode:       models.ParseModeHTML,
-		},
-		ReplyMarkup: gridKeyboard(sess.lang, tok, page, len(sess.results)),
-	})
+	// A double-tap re-rendering the same page reads as success: the client
+	// treats "message is not modified" as one.
+	err := h.api.EditMessageMedia(ctx, chatID, msgID, tg.InputMediaPhoto{
+		Media:   tg.InputFileUpload{Filename: "grid.jpg", Data: bytes.NewReader(img)},
+		Caption: gridCaption(sess.lang, page, len(sess.results)),
+	}, gridKeyboard(sess.lang, tok, page, len(sess.results)))
 	if err != nil {
-		if strings.Contains(err.Error(), "message is not modified") {
-			return // benign: a double-tap re-rendered the same page
-		}
 		h.log.Warn("editMessageMedia (grid) failed", "err", err)
 	}
 }
 
 // renderGrid downloads the covers for one page and composes the collage. It
 // re-announces the upload action because download+encode can take a few seconds.
-func (h *Handlers) renderGrid(ctx context.Context, b *bot.Bot, chatID int64, threadID int, sess *gridSession, page int) ([]byte, bool) {
+func (h *Handlers) renderGrid(ctx context.Context, chatID int64, threadID int, sess *gridSession, page int) ([]byte, bool) {
 	total := len(sess.results)
 	startIdx := page * gridPageSize
 	if startIdx >= total {
@@ -181,7 +171,7 @@ func (h *Handlers) renderGrid(ctx context.Context, b *bot.Bot, chatID int64, thr
 	pageResults := sess.results[startIdx:endIdx]
 
 	// Only announce the upload when there's real work to do (cache misses).
-	_, _ = b.SendChatAction(ctx, &bot.SendChatActionParams{ChatID: chatID, MessageThreadID: threadID, Action: models.ChatActionUploadPhoto})
+	_ = h.api.SendChatAction(ctx, chatID, threadID, tg.ChatActionUploadPhoto)
 
 	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	covers := h.fetchCovers(dctx, pageResults)
@@ -212,14 +202,14 @@ func (h *Handlers) renderGrid(ctx context.Context, b *bot.Bot, chatID int64, thr
 
 // sendGridPick sends a single chosen item full: an image as a photo, a video as
 // a cover card with Open/Download buttons (same card as inline/DM video).
-func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, threadID int, sess *gridSession, index int, user *models.User) {
+func (h *Handlers) sendGridPick(ctx context.Context, chatID int64, threadID int, sess *gridSession, index int, user *tg.User) {
 	if index < 0 || index >= len(sess.results) {
 		return
 	}
 	r := sess.results[index]
 	lang := sess.lang
 
-	_, _ = b.SendChatAction(ctx, &bot.SendChatActionParams{ChatID: chatID, MessageThreadID: threadID, Action: models.ChatActionUploadPhoto})
+	_ = h.api.SendChatAction(ctx, chatID, threadID, tg.ChatActionUploadPhoto)
 	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -232,7 +222,7 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 				"pool", r.Pool,
 				"host", hostOf(r.ThumbURL),
 			)
-			h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))
+			h.replyRetry(ctx, chatID, threadID, lang, i18n.T(lang, "load.failed"))
 			return
 		}
 
@@ -244,37 +234,36 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 			h.log.Warn("vido card intent unavailable", "err", mintErr)
 		}
 		kb := videoButtons(r, lang, download)
-		sent, err := b.SendPhoto(ctx, &bot.SendPhotoParams{
-			ChatID: chatID, MessageThreadID: threadID, Photo: &models.InputFileUpload{Filename: "cover.jpg", Data: bytes.NewReader(data)},
-			Caption: videoCaption(r), ParseMode: models.ParseModeHTML, ReplyMarkup: kb,
-		})
+		sent, err := h.api.SendPhoto(ctx, chatID,
+			tg.InputFileUpload{Filename: "cover.jpg", Data: bytes.NewReader(data)},
+			tg.CaptionOptions{ThreadID: threadID, Caption: videoCaption(r), Markup: kb})
 		if err != nil {
 			h.log.Warn("sendPhoto (pick video) failed", "err", err)
-			h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))
+			h.replyRetry(ctx, chatID, threadID, lang, i18n.T(lang, "load.failed"))
 			return
 		}
-		if token != "" && sent != nil {
-			if err := h.vido.BindIntentMessage(ctx, token, user.ID, chatID, sent.ID); err != nil {
+		if token != "" && sent.MessageID != 0 {
+			if err := h.vido.BindIntentMessage(ctx, token, user.ID, chatID, int(sent.MessageID)); err != nil {
 				h.log.Warn("bind vido card failed", "err", err)
 				// An unbound token is only chat-bound and must not remain on the
 				// card. Keep the source button while removing the unsafe callback.
-				if _, editErr := b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
-					ChatID: chatID, MessageID: sent.ID,
-					ReplyMarkup: videoButtons(r, lang, downloadButton{}),
-				}); editErr != nil {
+				if editErr := h.api.EditMessageReplyMarkup(ctx, chatID, sent.MessageID,
+					videoButtons(r, lang, downloadButton{})); editErr != nil {
 					h.log.Warn("remove unbound vido action failed", "err", editErr)
 				}
 			}
 		}
 	default: // image
 		if data, ok := h.downloadImage(dctx, coverURL(r)); ok {
-			if _, err := b.SendPhoto(ctx, &bot.SendPhotoParams{ChatID: chatID, MessageThreadID: threadID, Photo: &models.InputFileUpload{Filename: "image.jpg", Data: bytes.NewReader(data)}}); err != nil {
+			if _, err := h.api.SendPhoto(ctx, chatID,
+				tg.InputFileUpload{Filename: "image.jpg", Data: bytes.NewReader(data)},
+				tg.CaptionOptions{ThreadID: threadID}); err != nil {
 				h.log.Warn("sendPhoto (pick image) failed", "err", err)
-				h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))
+				h.replyRetry(ctx, chatID, threadID, lang, i18n.T(lang, "load.failed"))
 				return
 			}
 		} else {
-			h.replyRetry(ctx, b, chatID, threadID, lang, i18n.T(lang, "load.failed"))
+			h.replyRetry(ctx, chatID, threadID, lang, i18n.T(lang, "load.failed"))
 			return
 		}
 	}
@@ -283,38 +272,38 @@ func (h *Handlers) sendGridPick(ctx context.Context, b *bot.Bot, chatID int64, t
 
 // onGridCallback routes the grid buttons. Anyone in a group may use them (the
 // results are shared), so there's no owner check here.
-func (h *Handlers) onGridCallback(ctx context.Context, b *bot.Bot, cq *models.CallbackQuery, tok, action string, arg int) {
-	if cq.Message.Message == nil {
-		h.answerCB(ctx, b, cq.ID, "", false)
+func (h *Handlers) onGridCallback(ctx context.Context, cq *tg.CallbackQuery, tok, action string, arg int) {
+	if cq.Message.MessageID == 0 {
+		h.answerCB(ctx, cq.ID, "", false)
 		return
 	}
-	chatID := cq.Message.Message.Chat.ID
-	msgID := cq.Message.Message.ID
-	threadID := cq.Message.Message.MessageThreadID
+	chatID := cq.Message.Chat.ID
+	msgID := cq.Message.MessageID
+	threadID := cq.Message.MessageThreadID
 
 	// Close must work even after the session expired/was evicted: it needs only
 	// chatID/msgID from the callback, not the session.
 	if action == "x" {
-		_, _ = b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msgID})
-		h.answerCB(ctx, b, cq.ID, "", false)
+		_ = h.api.DeleteMessage(ctx, chatID, msgID)
+		h.answerCB(ctx, cq.ID, "", false)
 		return
 	}
 
 	sess, ok := h.grids.Get(tok)
 	if !ok {
-		h.answerCB(ctx, b, cq.ID, i18n.T(h.langCached(&cq.From), "grid.expired"), true)
+		h.answerCB(ctx, cq.ID, i18n.T(h.langCached(&cq.From), "grid.expired"), true)
 		return
 	}
 
 	switch action {
 	case "p":
-		h.answerCB(ctx, b, cq.ID, "", false)
-		h.editGridPage(ctx, b, chatID, msgID, threadID, tok, arg)
+		h.answerCB(ctx, cq.ID, "", false)
+		h.editGridPage(ctx, chatID, msgID, threadID, tok, arg)
 	case "i":
-		h.answerCB(ctx, b, cq.ID, "", false)
-		h.sendGridPick(ctx, b, chatID, threadID, sess, arg, &cq.From)
+		h.answerCB(ctx, cq.ID, "", false)
+		h.sendGridPick(ctx, chatID, threadID, sess, arg, &cq.From)
 	default:
-		h.answerCB(ctx, b, cq.ID, "", false)
+		h.answerCB(ctx, cq.ID, "", false)
 	}
 }
 
@@ -351,13 +340,13 @@ func coverURL(r search.MediaResult) string {
 // gridCaption is the vido-style header above the grid.
 func gridCaption(lang string, page, total int) string {
 	totalPages := (total + gridPageSize - 1) / gridPageSize
-	return "<b>🔎 " + i18n.T(lang, "grid.title") + "</b>\n<i>" +
+	return "<b>" + i18n.T(lang, "grid.title") + "</b>\n<i>" +
 		i18n.T(lang, "grid.hint", "page", strconv.Itoa(page+1), "total", strconv.Itoa(totalPages)) + "</i>"
 }
 
 // gridKeyboard builds: rows of numbered buttons (one per item on the page), a
 // nav row (◀ / Next 10), and a Close button.
-func gridKeyboard(lang, tok string, page, total int) *models.InlineKeyboardMarkup {
+func gridKeyboard(lang, tok string, page, total int) *tg.InlineKeyboardMarkup {
 	totalPages := (total + gridPageSize - 1) / gridPageSize
 	startIdx := page * gridPageSize
 	endIdx := startIdx + gridPageSize
@@ -365,11 +354,11 @@ func gridKeyboard(lang, tok string, page, total int) *models.InlineKeyboardMarku
 		endIdx = total
 	}
 
-	var nums []models.InlineKeyboardButton
+	var nums []tg.InlineKeyboardButton
 	for i := startIdx; i < endIdx; i++ {
-		nums = append(nums, models.InlineKeyboardButton{Text: strconv.Itoa(i + 1), CallbackData: gcb(tok, "i", i)})
+		nums = append(nums, tg.InlineKeyboardButton{Text: strconv.Itoa(i + 1), CallbackData: gcb(tok, "i", i)})
 	}
-	var rows [][]models.InlineKeyboardButton
+	var rows [][]tg.InlineKeyboardButton
 	for i := 0; i < len(nums); i += 5 {
 		end := i + 5
 		if end > len(nums) {
@@ -378,35 +367,35 @@ func gridKeyboard(lang, tok string, page, total int) *models.InlineKeyboardMarku
 		rows = append(rows, nums[i:end])
 	}
 
-	var nav []models.InlineKeyboardButton
+	var nav []tg.InlineKeyboardButton
 	if page > 0 {
-		nav = append(nav, models.InlineKeyboardButton{Text: i18n.T(lang, "grid.prev"), CallbackData: gcb(tok, "p", page-1)})
+		nav = append(nav, tg.InlineKeyboardButton{Text: i18n.T(lang, "grid.prev"), CallbackData: gcb(tok, "p", page-1)})
 	}
 	if page+1 < totalPages {
-		nav = append(nav, models.InlineKeyboardButton{Text: i18n.T(lang, "grid.next"), CallbackData: gcb(tok, "p", page+1)})
+		nav = append(nav, tg.InlineKeyboardButton{Text: i18n.T(lang, "grid.next"), CallbackData: gcb(tok, "p", page+1)})
 	}
 	if len(nav) > 0 {
 		rows = append(rows, nav)
 	}
-	rows = append(rows, []models.InlineKeyboardButton{{Text: i18n.T(lang, "action.close"), CallbackData: gcb(tok, "x", 0)}})
-	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
+	rows = append(rows, []tg.InlineKeyboardButton{{Text: i18n.T(lang, "action.close"), CallbackData: gcb(tok, "x", 0)}})
+	return &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 // replyRetry sends an info message with a one-tap inline-search button, so an
 // empty or failed result isn't a dead-end (the button matters most in groups,
 // where there's no plain-text search). The prior query is intentionally not
 // pre-filled — it's never stored (privacy).
-func (h *Handlers) replyRetry(ctx context.Context, b *bot.Bot, chatID int64, threadID int, lang, text string) {
-	kb := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+func (h *Handlers) replyRetry(ctx context.Context, chatID int64, threadID int, lang, text string) {
+	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
 		{{Text: i18n.T(lang, "btn.search"), SwitchInlineQueryCurrentChat: strptr("")}},
 	}}
-	if _, err := b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, MessageThreadID: threadID, Text: text, ParseMode: models.ParseModeHTML, ReplyMarkup: kb}); err != nil {
+	if _, err := h.api.SendReply(ctx, chatID, 0, threadID, text, kb); err != nil {
 		h.log.Warn("sendMessage (retry) failed", "err", err)
 	}
 }
 
 // recordPick logs a sent item (type + engine only — never the query/title/url).
-func (h *Handlers) recordPick(u *models.User, r search.MediaResult) {
+func (h *Handlers) recordPick(u *tg.User, r search.MediaResult) {
 	if h.store == nil || u == nil {
 		return
 	}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-telegram/bot/models"
+	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/i18n"
 	"searchy/internal/search"
@@ -61,7 +61,7 @@ func TestFmtDuration(t *testing.T) {
 
 func TestLangResolveCachesTelegramFallback(t *testing.T) {
 	h := &Handlers{}
-	u := &models.User{ID: 42, LanguageCode: "ru-RU"}
+	u := &tg.User{ID: 42, LanguageCode: "ru-RU"}
 
 	if got := h.langResolve(context.Background(), u); got != "ru" {
 		t.Fatalf("langResolve() = %q, want ru", got)

@@ -2,13 +2,111 @@
 
 All notable Searchy changes are documented here.
 
-Searchy uses SemVer-style versions with pre-release tags before `v1.0.0`. Release
-notes should be copied from the relevant changelog section and lightly edited for
-GitHub Releases.
+The `## <tag>` section of this file *is* the GitHub Release body: the release
+workflow copies it verbatim and refuses a tag that has no section. Write it
+for whoever has to decide whether to upgrade.
+
+See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
+[`docs/releases.md`](docs/releases.md) for how a release is published.
 
 ## Unreleased
 
 Use this section for changes that are merged but not released yet.
+
+## v0.2.1 - 2026-09-09
+
+Searchy leaves the third-party Telegram client it was the last bot in the family
+to use, and moves onto the shared one. Nothing about searching changes; what
+changes is that it can now be given the things the shared client gets.
+
+
+### Changed
+
+- Depends on the stable `github.com/FreshLabDev/tg` v0.1.0.
+
+- **`/start` is a different screen in a group than in a DM.** A DM is the
+  user's own space, so it keeps language and personal statistics and has no
+  Close — there is nothing else in the chat, and the button offered to delete
+  the only thing on screen. A group is shared, so the panel there leads with
+  inline search, keeps Help and About, points at the DM for the personal
+  settings, and always offers Close: the panel is one member's menu sitting in
+  everyone else's feed. Help, About, Language and Statistics follow the same
+  rule — Close only where there is something to close.
+- **The About tab is the family's format.** Name and version on one line, one
+  line of purpose, then a blockquote of `key · value` facts: the search backend,
+  the build date, the repository as a link with its license, and the admin. The
+  repository is a link inside the text rather than a button of its own, because
+  two controls for one action is one too many. Everything is translated into all
+  16 languages, values included.
+- The build date is visible. `aboutBody` had been passing `buildinfo.Date` into
+  a string that referenced it in none of the 16 languages, so nothing told a CI
+  build from a laptop one.
+- **Emoji are gone from every button and heading**, in all 16 languages: About,
+  Help, Language, Statistics, Search, Download, Video download settings, Open
+  original, Open on {platform}, Retry sending, the `/start` greeting, the panel
+  headings and the results caption. They stay only where they mark state — the
+  selected language and the active statistics tab keep `◉ / ◎`. An icon on every
+  control is decoration that stops meaning anything, which is why the marks that
+  do mean something got lost in it.
+- Navigation reads `Back` and `Close`, without the `⬅` and `✖`.
+- `homePanel` is assembled the way every other panel is, through `header()` and
+  `blockquote()`, instead of concatenating three keys by hand.
+- **Searchy runs entirely on `github.com/FreshLabDev/tg`.**
+  `github.com/go-telegram/bot` is gone: the poll loop, every send, the inline
+  answers and the Vido delivery bridge all go through the family's own client.
+  Searchy was the last bot on a third-party library, which cost it everything
+  the shared client had learned — Bot API 10.3 button styles, ephemeral
+  messages, one place for token redaction, one retry policy, one set of error
+  classifiers — and the gap was only going to widen.
+- The dispatcher is now searchy's own long-polling loop. Updates are still
+  handled concurrently (`WORKERS`, default 32), because the inline path
+  deliberately blocks: the debouncer holds a keystroke for its window and
+  abandons it when a newer one arrives, which only works while both are in
+  flight. The offset advances as soon as an update is dispatched, as it did
+  before, and a failed poll backs off from one second to thirty rather than
+  ending the process.
+- **Preflight now lists everything searchy cannot work without**, not just two
+  methods: `answerInlineQuery`, `answerCallbackQuery`, `deleteMessage`,
+  `editMessageMedia`, `editMessageReplyMarkup`, `editMessageText`,
+  `sendMessage` and `sendPhoto` — plus `sendVideo`, `sendAudio`, `sendDocument`
+  and `sendMediaGroup` when the Vido bridge is on, since those are only
+  reachable through it. A Bot API server too old for any of them now refuses
+  the start instead of letting searchy poll happily and answer nothing, which
+  is the failure the check exists for.
+- A Vido plan's `local_file_uri` is sent as a local path rather than a bare
+  `file://` string, so a searchy pointed at Telegram's own endpoint is told
+  that the path could never work there, instead of getting back a
+  wrong-file-identifier error that points nowhere near the cause.
+- Delivery failures are classified from Telegram's HTTP status rather than a
+  library's sentinel errors. The `definite failure` set is unchanged (400, 401,
+  403, 404); everything else still becomes `delivery_unknown`, so a send that
+  may have landed is never silently retried.
+- Captions and text in a delivery plan are always sent as HTML. The plan field
+  is named `caption_html` and its text is Vido's own, so the previous
+  `parse_mode` passthrough only ever chose between HTML and rendering HTML
+  literally.
+- One versioning and release document for the whole family. `docs/versioning.md`
+  and `docs/releases.md` are now byte-identical across every Asterfield
+  repository apart from two clearly marked sections: this repository's own
+  version line, and the surface where a change here breaks something. They spell
+  out what each of the three numbers means, what the `-alpha.N` suffix counts,
+  when alpha becomes beta and when it is legitimate to skip to rc or run a
+  pre-release in production.
+- **Pre-releases are now tagged on `dev`, not `main`.** Only stable versions are
+  tagged on `main`, on the merge commit from `dev`. `release.yml` had no branch
+  check at all before, so a tag pushed from any branch would publish; it now
+  refuses a tag that is not on the branch its channel is published from.
+  Earlier pre-releases were tagged on `main` under the previous rule; they are
+  left as they are.
+
+
+- The production stack pulls the released image instead of building one.
+  `deploy/ws04/searchy/compose.yaml` built from a working copy on the host, so
+  what served users was not the artifact CI had tested, scanned and published,
+  and the version it reported came from `SEARCHY_VERSION` / `SEARCHY_COMMIT` /
+  `SEARCHY_BUILD_DATE` kept by hand in `.env`. Those are now baked into the
+  image by the release workflow, and `SEARCHY_IMAGE` -- which has no default,
+  so an unset one stops the stack -- names the GHCR reference to run.
 
 ## v0.2.0-alpha.4 - 2026-09-08
 
@@ -27,6 +125,14 @@ Use this section for changes that are merged but not released yet.
   the first poll.
 
 ### Added
+
+- `docs/releases.md` gained a **Deploying** section, and `AGENTS.md` points at it.
+  Releasing was documented; deploying was not, in any repository in the family —
+  the process stopped at "deploy it" and never said how. That gap mattered more
+  after the stacks moved from building on the host to pulling a published image,
+  because the procedure changed on the same day. The section names this stack's
+  host directory, its env file, the variable that selects the image, the networks
+  it needs, and what a rollback actually is.
 
 - A startup preflight naming `answerInlineQuery` and `sendPhoto`. Searchy is
   an inline bot that answers with pictures, and a Bot API server without those
@@ -301,7 +407,7 @@ groups — built with privacy and speed as first principles.
   - `/healthz` runtime health endpoint reporting the stamped build
     version/commit/date, a distroless image with a binary `-healthcheck` probe,
     graceful shutdown, and JSON structured logging.
-- Apache-2.0 license under FreshLab.
+- Apache-2.0 license under Asterfield.
 - Project documentation for architecture, the SearXNG integration, Telegram
   behavior, versioning, and release process.
 
