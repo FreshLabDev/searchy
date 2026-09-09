@@ -4,7 +4,7 @@ module searchy
 go 1.26.6
 
 require (
-	github.com/FreshLabDev/tg v0.1.0-alpha.1
+	github.com/FreshLabDev/tg v0.1.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jackc/pgx/v5 v5.10.0
 	golang.org/x/image v0.45.0

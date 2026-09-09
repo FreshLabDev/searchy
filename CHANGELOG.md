@@ -22,6 +22,8 @@ changes is that it can now be given the things the shared client gets.
 
 ### Changed
 
+- Depends on the stable `github.com/FreshLabDev/tg` v0.1.0.
+
 - **`/start` is a different screen in a group than in a DM.** A DM is the
   user's own space, so it keeps language and personal statistics and has no
   Close — there is nothing else in the chat, and the button offered to delete
