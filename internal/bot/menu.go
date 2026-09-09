@@ -229,7 +229,6 @@ func aboutPanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeybo
 	b.WriteString("\n\n")
 	b.WriteString(blockquote(
 		aboutField(lang, "about.field.search", i18n.T(lang, "about.value.search")),
-		aboutField(lang, "about.field.build", buildDate()),
 		aboutField(lang, "about.field.source", `<a href="https://github.com/FreshLabDev/searchy">FreshLabDev/searchy</a> · Apache-2.0`),
 		aboutField(lang, "about.field.admin", `<a href="https://t.me/amtiyo">@amtiyo</a>`),
 	))
@@ -241,15 +240,6 @@ func aboutPanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeybo
 
 func aboutField(lang, labelKey, value string) string {
 	return i18n.T(lang, labelKey) + " · " + value
-}
-
-// buildDate is the stamp CI puts in the binary. An unstamped local build says
-// "unknown", which is a fact worth showing rather than an empty line.
-func buildDate() string {
-	if date := strings.TrimSpace(buildinfo.Date); date != "" {
-		return escapeHTML(date)
-	}
-	return "unknown"
 }
 
 func aboutVersion(version string) string {

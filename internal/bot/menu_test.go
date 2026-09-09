@@ -41,17 +41,17 @@ func TestAboutPanelShowsOneVersionPrefixInEveryLocale(t *testing.T) {
 	}
 }
 
-// The build date used to be passed to a string that never referenced it, so
-// nobody could tell a CI build from a laptop one by looking at the panel.
-func TestAboutPanelShowsTheBuildDate(t *testing.T) {
+// The About card states the version and nothing else about the build. A build
+// stamp here made this card read differently from every other bot's.
+func TestAboutPanelStatesTheVersionAndNoBuildStamp(t *testing.T) {
 	previousDate := buildinfo.Date
 	buildinfo.Date = "2026-09-09T12:00:00Z"
 	t.Cleanup(func() { buildinfo.Date = previousDate })
 
 	for _, language := range i18n.LANGUAGE_OPTIONS {
 		text, _ := aboutPanel(language.Code, 1, false)
-		if !strings.Contains(text, "2026-09-09T12:00:00Z") {
-			t.Fatalf("locale %s omitted the build date: %q", language.Code, text)
+		if strings.Contains(text, "2026-09-09T12:00:00Z") {
+			t.Fatalf("locale %s still shows the build stamp: %q", language.Code, text)
 		}
 	}
 }
@@ -85,7 +85,7 @@ func TestAboutPanelIsFullyLocalized(t *testing.T) {
 		}
 		text, _ := aboutPanel(language.Code, 1, false)
 		for _, key := range []string{"about.tagline", "about.field.search", "about.value.search",
-			"about.field.build", "about.field.source", "about.field.admin"} {
+			"about.field.source", "about.field.admin"} {
 			localized := i18n.T(language.Code, key)
 			if localized == "" {
 				t.Fatalf("%s has no %s", language.Code, key)

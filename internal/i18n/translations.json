@@ -377,24 +377,6 @@
     "cs": "SearXNG (vlastní server)",
     "tr": "SearXNG (kendi sunucumuz)"
   },
-  "about.field.build": {
-    "en": "Build",
-    "ru": "Сборка",
-    "uk": "Збірка",
-    "es": "Compilación",
-    "fr": "Compilation",
-    "zh": "构建",
-    "ja": "ビルド",
-    "ar": "البناء",
-    "de": "Erstellt",
-    "be": "Зборка",
-    "sv": "Byggd",
-    "it": "Compilazione",
-    "ca": "Compilació",
-    "pl": "Kompilacja",
-    "cs": "Sestavení",
-    "tr": "Derleme"
-  },
   "about.field.source": {
     "en": "Source",
     "ru": "Исходники",
