@@ -90,7 +90,6 @@ Use this section for changes that are merged but not released yet.
   Earlier pre-releases were tagged on `main` under the previous rule; they are
   left as they are.
 
-### Changed
 
 - The production stack pulls the released image instead of building one.
   `deploy/ws04/searchy/compose.yaml` built from a working copy on the host, so
