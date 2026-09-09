@@ -157,3 +157,18 @@ docker compose -f deploy/docker-compose.yml config
 
 Searchy is licensed under Apache-2.0. Preserve the root `LICENSE` and `NOTICE`
 files and keep public documentation consistent with that license.
+
+## Deploying
+
+Do not invent a deploy. [`docs/releases.md`](docs/releases.md) has a **Deploying**
+section describing this stack exactly: which host directory it lives in, which
+env file names the image, which networks it needs, and how to roll back. Read it
+before touching anything on the host.
+
+Two rules that hold everywhere and are easy to get wrong:
+
+- **Nothing is built on the host.** A production stack pulls the image the
+  release workflow published. A `build:` section in a production manifest is a
+  bug.
+- **Pin the digest, not the tag.** A tag moves; a digest names one build that was
+  tested, and a rollback becomes one line with nothing to rebuild.

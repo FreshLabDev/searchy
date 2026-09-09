@@ -92,6 +92,79 @@ the whole rollback — and then publish a new patch that fixes what went wrong.
 A version that was published is a fact about what existed. Rewriting it makes
 every other record of it wrong.
 
+## Deploying
+
+The host is WS04. Every stack lives in `/opt/stacks/<stack>` and is driven by the
+`ws04` CLI, which exists on the operator's machine and reaches the host over the
+LAN. Nothing here is built on the host any more: a stack pulls the image the
+release workflow published and runs that. If you find a `build:` section in a
+production manifest, that is a bug, not a shortcut.
+
+### One deploy
+
+```sh
+ws04 deploy searchy --dry-run --yes    # prints what it would do, changes nothing
+ws04 deploy searchy --yes
+```
+
+`deploy` snapshots the stack's compose, env and image ids into
+`/opt/stacks/.ws04/deploy-snapshots/searchy/<timestamp>`, pulls, brings the stack
+up, waits up to ninety seconds for the container to report healthy, and **rolls
+back on its own** if it does not. The snapshot is kept either way.
+
+### Pointing the stack at a version
+
+The image is chosen by one variable in the stack's env file on the host, not by
+anything in this repository:
+
+```sh
+SEARCHY_IMAGE=ghcr.io/freshlabdev/searchy@sha256:<digest>
+```
+
+Pin the **digest**, not the tag. A tag can be moved; a digest names one build
+that was tested, so a rollback is one line with nothing to rebuild, and
+`docker inspect` on the running container answers which commit it came from. The
+digest of a release is in its GitHub Release notes, or:
+
+```sh
+gh api /orgs/FreshLabDev/packages/container/searchy/versions \
+  --jq '.[] | select(.metadata.container.tags[]? == "<tag>") | .name'
+```
+
+The variable has no default. An unset one stops the stack with a message naming
+it, rather than quietly starting something else.
+
+### Rolling back
+
+Set `SEARCHY_IMAGE` to the previous digest and deploy again. That is the whole
+rollback — the images are still on the host, and nothing is rebuilt. Then publish
+a patch that fixes what went wrong; never retag or delete the bad release.
+
+### What this stack needs to exist
+
+| | |
+|:--|:--|
+| Stack | `searchy` — `/opt/stacks/searchy` |
+| Manifest | [`deploy/ws04/searchy/compose.yaml`](deploy/ws04/searchy/compose.yaml) in this repository |
+| Env file | `.env` on the host, never in git |
+| Networks | `core_net` (core-postgres), `searchy_net` (SearXNG), `telegram_bot_api_net` (the self-hosted Bot API server) |
+
+`SEARCHY_VERSION`, `SEARCHY_COMMIT` and `SEARCHY_BUILD_DATE` used to be kept by
+hand in this env file and had drifted two releases behind the running code. They
+are gone: the release workflow bakes the real ones into the image.
+
+### Checking what is running
+
+```sh
+ws04 container list                    # health of everything
+ws04 logs searchy-bot --since 1h
+ws04 container inspect searchy-bot     # includes the image digest
+```
+
+The bot also reports its own version — from the About card in Telegram, and from
+its health endpoint where it has one. Those two and `docker inspect` should
+agree; if they do not, something was deployed by hand.
+
 ## Verification
 
 The local machine may not have `go` in `PATH`; Docker is the reliable route:
