@@ -176,6 +176,7 @@ func TestButtonsAndHeadingsCarryNoDecorativeEmoji(t *testing.T) {
 	keys := []string{
 		"home.title", "btn.language", "btn.stats", "btn.help", "btn.about",
 		"btn.search", "btn.download", "btn.video_settings", "btn.open_dm",
+		"btn.follow_telegram",
 		"btn.open_platform", "btn.open_original", "action.back", "action.close",
 		"language.title", "help.title", "stats.title.personal", "stats.title.global",
 		"download.retry_button",
@@ -251,6 +252,10 @@ func TestStateCarriesSuccessAndNothingElseIsColoured(t *testing.T) {
 			t.Errorf("%s has style %q, want %q", option.Code, button.Style, want)
 		}
 	}
+	if button, _ := findButton(language, "m:1:lfollow"); button.Style != "" {
+		t.Errorf("Follow Telegram is coloured %q; it is neither state nor the reason to be here", button.Style)
+	}
+
 	for _, global := range []bool{false, true} {
 		open, shut := "m:1:statsp", "m:1:statsg"
 		if global {
@@ -331,6 +336,37 @@ func TestEveryCloseIsDanger(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s has no Close", name)
+		}
+	}
+}
+
+// "Follow Telegram" deletes this bot's manual claim so the Telegram hint wins
+// again. It belongs under the grid and above the nav row, and it must be
+// translated everywhere or a Czech picker grows one English button.
+func TestLanguagePanelOffersFollowTelegramBelowTheGrid(t *testing.T) {
+	_, kb := languagePanel("en", 1, true)
+	rows := kb.InlineKeyboard
+	follow := -1
+	for i, row := range rows {
+		for _, button := range row {
+			if button.CallbackData == "m:1:lfollow" {
+				follow = i
+			}
+		}
+	}
+	if follow < 0 {
+		t.Fatal("the language screen has no way back to the Telegram language")
+	}
+	if follow != len(rows)-2 {
+		t.Fatalf("Follow Telegram is row %d of %d; it belongs below the grid and above the nav row", follow, len(rows))
+	}
+	if len(rows[follow]) != 1 {
+		t.Fatalf("Follow Telegram shares its row with %d other buttons", len(rows[follow])-1)
+	}
+	for _, language := range i18n.LANGUAGE_OPTIONS {
+		value := i18n.T(language.Code, "btn.follow_telegram")
+		if value == "" || strings.HasPrefix(value, "[") {
+			t.Errorf("%s has no btn.follow_telegram", language.Code)
 		}
 	}
 }

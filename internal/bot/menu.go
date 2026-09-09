@@ -14,7 +14,7 @@ import (
 
 // Menu navigation is callback-driven (vido style): /start posts a panel and each
 // button edits it in place. Callback data: "m:<owner>:<action>" where action ∈
-// {home, language, statsp, statsg, help, about, close} or "l|<code>".
+// {home, language, lfollow, statsp, statsg, help, about, close} or "l|<code>".
 //
 // Formatting follows vido's rule exactly: a header of <b>title</b> + <i>hint</i>,
 // then a <blockquote> of content lines. Selection marks use ◉ / ◎.
@@ -179,11 +179,11 @@ func groupHome(lang, botUsername string, owner int64) (string, *tg.InlineKeyboar
 }
 
 // languagePanel — the language picker (2 per row), every option marked, the
-// current one green.
+// current one green. Below the grid sits the way back out of a manual choice.
 func languagePanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, "language.title", "language.hint")
 	opts := i18n.LANGUAGE_OPTIONS
-	rows := make([][]tg.InlineKeyboardButton, 0, (len(opts)+1)/2+1)
+	rows := make([][]tg.InlineKeyboardButton, 0, (len(opts)+1)/2+2)
 	for i := 0; i < len(opts); i += 2 {
 		row := []tg.InlineKeyboardButton{languageButton(opts[i], lang, owner)}
 		if i+1 < len(opts) {
@@ -191,6 +191,12 @@ func languagePanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKe
 		}
 		rows = append(rows, row)
 	}
+	// Handing the choice back to Telegram is not a seventeenth language, so it
+	// carries no selection mark — and it is not what a person came here to do,
+	// so it carries no colour either.
+	rows = append(rows, []tg.InlineKeyboardButton{{
+		Text: i18n.T(lang, "btn.follow_telegram"), CallbackData: cb(owner, "lfollow"),
+	}})
 	rows = append(rows, navRow(lang, owner, inGroup))
 	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }

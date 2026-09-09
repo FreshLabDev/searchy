@@ -269,6 +269,24 @@
     "cs": "Platí pro moje odpovědi.",
     "tr": "Yanıtlarıma uygulanır."
   },
+  "btn.follow_telegram": {
+    "en": "Follow Telegram",
+    "ru": "Как в Telegram",
+    "uk": "Як у Telegram",
+    "es": "Como en Telegram",
+    "fr": "Comme dans Telegram",
+    "zh": "跟随 Telegram",
+    "ja": "Telegram に合わせる",
+    "ar": "مثل Telegram",
+    "de": "Wie in Telegram",
+    "be": "Як у Telegram",
+    "sv": "Som i Telegram",
+    "it": "Come in Telegram",
+    "ca": "Com al Telegram",
+    "pl": "Jak w Telegramie",
+    "cs": "Jako v Telegramu",
+    "tr": "Telegram'daki gibi"
+  },
   "language.updated": {
     "en": "Language updated to {language}.",
     "ru": "Язык изменён на {language}.",
