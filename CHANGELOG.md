@@ -13,6 +13,23 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.2 - 2026-09-10
+
+A language picked by hand can be handed back, and the sixteen-button grid stops
+looking broken.
+
+Only the selected language carried a glyph, so fifteen labels started at the
+left edge and one started two characters in. Close is now written in one place
+and painted destructive, and the three buttons that carry meaning are the only
+coloured ones.
+
+### Changed
+
+- `docs/releases.md` names the real cause of the `403` a digest pull used to
+  answer: the account running the deploy could not read the private package,
+  not anything about the digest. Pulling the tag first was a workaround for
+  that, and is no longer required.
+
 ## v0.2.2-alpha.1 - 2026-09-09
 
 ### Added
