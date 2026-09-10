@@ -13,6 +13,55 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.2 - 2026-09-10
+
+A language picked by hand can be handed back, and the sixteen-button grid stops
+looking broken.
+
+Only the selected language carried a glyph, so fifteen labels started at the
+left edge and one started two characters in. Close is now written in one place
+and painted destructive, and the three buttons that carry meaning are the only
+coloured ones.
+
+### Changed
+
+- `docs/releases.md` names the real cause of the `403` a digest pull used to
+  answer: the account running the deploy could not read the private package,
+  not anything about the digest. Pulling the tag first was a workaround for
+  that, and is no longer required.
+
+## v0.2.2-alpha.1 - 2026-09-09
+
+### Added
+
+- **"Follow Telegram" on the language screen.** Picking a language wrote a
+  manual claim to the shared core store, and a manual claim outranks
+  everything — but nothing removed it, so one mistaken tap followed a person
+  across every bot in the family until an admin deleted the row by hand. The
+  new button under the grid deletes searchy's own observation and lets the
+  Telegram client's `language_code` win again. Translated into all 16
+  languages.
+
+### Changed
+
+- **Every option of a set is marked, in both states.** The language picker
+  marked only the current language, so fifteen labels started at the button's
+  left edge and one started two characters in. Both states now carry a glyph
+  (`◉ ` / `◎ `), the way the statistics tabs already did.
+- **Three buttons carry colour, and no others.** Close is destructive
+  everywhere it appears — including the result grid, which had its own copy of
+  it. The current language and the open statistics tab are marked as state.
+  Language on the DM `/start` panel is the one thing that leads, because
+  nothing else on that screen is legible until the language is right. The group
+  panel leads with inline search by position and takes no colour at all. Older
+  Telegram clients ignore button styles and show the panels exactly as before.
+- **Every screen's text comes from the same two helpers.** The About card, the
+  result grid caption and the "Bot" sub-heading in global statistics each wrote
+  their own bold/italic markup; the empty statistics screen put its one line
+  outside the blockquote, so the panel changed shape depending on whether you
+  had searched yet. Only that empty screen looks different — it gains the
+  blockquote every other panel has.
+
 ## v0.2.1 - 2026-09-09
 
 Searchy leaves the third-party Telegram client it was the last bot in the family

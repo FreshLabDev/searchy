@@ -266,6 +266,15 @@ func (h *Handlers) onCallback(ctx context.Context, cq *tg.CallbackQuery) {
 	case action == "language":
 		text, kb := languagePanel(lang, owner, inGroup)
 		h.editPanel(ctx, chatID, msgID, text, kb)
+	case action == "lfollow":
+		// Drop this bot's own claim and re-resolve: with nothing of ours left,
+		// the Telegram client's language_code hint wins again.
+		h.clearLanguage(ctx, cq.From.ID)
+		lang = h.langResolve(ctx, &cq.From)
+		text, kb := languagePanel(lang, owner, inGroup)
+		h.editPanel(ctx, chatID, msgID, text, kb)
+		h.answerCB(ctx, cq.ID, i18n.T(lang, "language.updated", "language", i18n.LabelOf(lang)), false)
+		return
 	case strings.HasPrefix(action, "l|"):
 		code := action[2:]
 		if i18n.IsSupported(code) {
@@ -474,6 +483,24 @@ func (h *Handlers) setLanguage(userID int64, code, source string) {
 		defer cancel()
 		h.core.SetLanguage(ctx, core.ScopeUser, userID, code, source)
 	}()
+}
+
+// clearLanguage deletes this bot's language claim in core and forgets the
+// cached value, so the next resolve falls back to whatever core still knows and,
+// failing that, to the Telegram client's own language_code hint.
+//
+// Unlike setLanguage it blocks: the panel is re-rendered from the result, and
+// reading core before the delete has landed would redraw the very choice we
+// just deleted.
+func (h *Handlers) clearLanguage(ctx context.Context, userID int64) {
+	if h.core != nil {
+		c, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		h.core.ClearLanguage(c, core.ScopeUser, userID)
+	}
+	// Forget the cached value last: dropping it before the delete has landed
+	// would let a concurrent lookup re-cache the very choice we are removing.
+	h.langCache.Delete(userID)
 }
 
 // statsView returns the stats to render plus an "updated HH:MM" label. It serves

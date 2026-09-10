@@ -6,6 +6,7 @@ import (
 
 	"github.com/FreshLabDev/tg"
 
+	"searchy/internal/core"
 	"searchy/internal/i18n"
 	"searchy/internal/search"
 )
@@ -75,5 +76,26 @@ func TestLangResolveCachesTelegramFallback(t *testing.T) {
 	}
 	if got := h.langResolve(context.Background(), nil); got != i18n.DefaultLang {
 		t.Fatalf("nil user langResolve() = %q, want %q", got, i18n.DefaultLang)
+	}
+}
+
+// "Follow Telegram" has to undo a manual pick, not just re-render the panel:
+// leaving the choice in the language cache would keep answering in it until the
+// process restarted, whatever core says.
+func TestClearLanguageRestoresTheTelegramHint(t *testing.T) {
+	h := &Handlers{}
+	u := &tg.User{ID: 42, LanguageCode: "ru-RU"}
+
+	h.setLanguage(u.ID, "ja", core.SourceManual)
+	if got := h.langResolve(context.Background(), u); got != "ja" {
+		t.Fatalf("manual pick did not take: langResolve() = %q, want ja", got)
+	}
+
+	h.clearLanguage(context.Background(), u.ID)
+	if _, ok := h.langCache.Load(u.ID); ok {
+		t.Fatal("the manual pick is still cached after Follow Telegram")
+	}
+	if got := h.langResolve(context.Background(), u); got != "ru" {
+		t.Fatalf("langResolve() = %q after Follow Telegram, want the Telegram hint ru", got)
 	}
 }

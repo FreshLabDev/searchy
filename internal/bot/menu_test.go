@@ -7,6 +7,7 @@ import (
 	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/buildinfo"
+	"searchy/internal/db"
 	"searchy/internal/i18n"
 )
 
@@ -41,17 +42,17 @@ func TestAboutPanelShowsOneVersionPrefixInEveryLocale(t *testing.T) {
 	}
 }
 
-// The build date used to be passed to a string that never referenced it, so
-// nobody could tell a CI build from a laptop one by looking at the panel.
-func TestAboutPanelShowsTheBuildDate(t *testing.T) {
+// The About card states the version and nothing else about the build. A build
+// stamp here made this card read differently from every other bot's.
+func TestAboutPanelStatesTheVersionAndNoBuildStamp(t *testing.T) {
 	previousDate := buildinfo.Date
 	buildinfo.Date = "2026-09-09T12:00:00Z"
 	t.Cleanup(func() { buildinfo.Date = previousDate })
 
 	for _, language := range i18n.LANGUAGE_OPTIONS {
 		text, _ := aboutPanel(language.Code, 1, false)
-		if !strings.Contains(text, "2026-09-09T12:00:00Z") {
-			t.Fatalf("locale %s omitted the build date: %q", language.Code, text)
+		if strings.Contains(text, "2026-09-09T12:00:00Z") {
+			t.Fatalf("locale %s still shows the build stamp: %q", language.Code, text)
 		}
 	}
 }
@@ -85,7 +86,7 @@ func TestAboutPanelIsFullyLocalized(t *testing.T) {
 		}
 		text, _ := aboutPanel(language.Code, 1, false)
 		for _, key := range []string{"about.tagline", "about.field.search", "about.value.search",
-			"about.field.build", "about.field.source", "about.field.admin"} {
+			"about.field.source", "about.field.admin"} {
 			localized := i18n.T(language.Code, key)
 			if localized == "" {
 				t.Fatalf("%s has no %s", language.Code, key)
@@ -175,6 +176,7 @@ func TestButtonsAndHeadingsCarryNoDecorativeEmoji(t *testing.T) {
 	keys := []string{
 		"home.title", "btn.language", "btn.stats", "btn.help", "btn.about",
 		"btn.search", "btn.download", "btn.video_settings", "btn.open_dm",
+		"btn.follow_telegram",
 		"btn.open_platform", "btn.open_original", "action.back", "action.close",
 		"language.title", "help.title", "stats.title.personal", "stats.title.global",
 		"download.retry_button",
@@ -192,15 +194,225 @@ func TestButtonsAndHeadingsCarryNoDecorativeEmoji(t *testing.T) {
 	}
 }
 
-// The selection and tab marks are the deliberate exception, and they must
-// survive the sweep.
+// The selection marks are the deliberate exception, and they must survive the
+// sweep. Both states are drawn: a set where only the chosen option is marked
+// leaves one row indented two characters past all the others.
 func TestStateMarksSurvive(t *testing.T) {
-	if curMark(true) != "◉ " || curMark(false) != "" {
-		t.Fatal("the language picker lost its selection mark")
+	if stateMark(true) != "◉ " || stateMark(false) != "◎ " {
+		t.Fatal("the selection marks lost a state")
 	}
-	if tabMark(true) != "◉ " || tabMark(false) != "◎ " {
-		t.Fatal("the stats panel lost its tab marks")
+}
+
+// Every option of a set is marked, so the column has one left edge. This was
+// wrong for a year: fifteen language buttons started at the edge and one did not.
+func TestEveryOptionOfASetIsMarked(t *testing.T) {
+	_, language := languagePanel("ru", 1, false)
+	marked := 0
+	for _, option := range i18n.LANGUAGE_OPTIONS {
+		button, ok := findButton(language, "m:1:l|"+option.Code)
+		if !ok {
+			t.Fatalf("the picker lost %s", option.Code)
+		}
+		if !strings.HasPrefix(button.Text, "◉ ") && !strings.HasPrefix(button.Text, "◎ ") {
+			t.Fatalf("%s starts at a different left edge: %q", option.Code, button.Text)
+		}
+		if strings.HasPrefix(button.Text, "◉ ") {
+			marked++
+		}
 	}
+	if marked != 1 {
+		t.Fatalf("%d languages claim to be the current one, want exactly 1", marked)
+	}
+
+	for _, global := range []bool{false, true} {
+		_, stats := statsPanel("en", 1, db.Stats{}, global, "", false)
+		for _, data := range []string{"m:1:statsp", "m:1:statsg"} {
+			button, ok := findButton(stats, data)
+			if !ok {
+				t.Fatalf("the stats panel lost %s", data)
+			}
+			if !strings.HasPrefix(button.Text, "◉ ") && !strings.HasPrefix(button.Text, "◎ ") {
+				t.Fatalf("tab %s is unmarked: %q", data, button.Text)
+			}
+		}
+	}
+}
+
+// Success says "this is the state you are in": the current language and the open
+// statistics tab report state, they do not perform an action.
+func TestStateCarriesSuccessAndNothingElseIsColoured(t *testing.T) {
+	_, language := languagePanel("ru", 1, false)
+	for _, option := range i18n.LANGUAGE_OPTIONS {
+		button, _ := findButton(language, "m:1:l|"+option.Code)
+		want := ""
+		if option.Code == "ru" {
+			want = tg.StyleSuccess
+		}
+		if button.Style != want {
+			t.Errorf("%s has style %q, want %q", option.Code, button.Style, want)
+		}
+	}
+	if button, _ := findButton(language, "m:1:lfollow"); button.Style != "" {
+		t.Errorf("Follow Telegram is coloured %q; it is neither state nor the reason to be here", button.Style)
+	}
+
+	for _, global := range []bool{false, true} {
+		open, shut := "m:1:statsp", "m:1:statsg"
+		if global {
+			open, shut = shut, open
+		}
+		_, stats := statsPanel("en", 1, db.Stats{}, global, "", false)
+		if button, _ := findButton(stats, open); button.Style != tg.StyleSuccess {
+			t.Errorf("the open tab has style %q, want Success — it reports state, not an action", button.Style)
+		}
+		if button, _ := findButton(stats, shut); button.Style != "" {
+			t.Errorf("the closed tab is coloured %q", button.Style)
+		}
+	}
+}
+
+// At most one Primary per screen, and on the DM home it is Language: nothing
+// else on that screen is readable until the language is right.
+func TestAtMostOnePrimaryPerScreen(t *testing.T) {
+	screens := map[string]*tg.InlineKeyboardMarkup{}
+	_, screens["home.dm"] = homePanel("en", "searchybot", "vidobot", 1, false)
+	_, screens["home.group"] = homePanel("en", "searchybot", "vidobot", 1, true)
+	_, screens["language"] = languagePanel("en", 1, true)
+	_, screens["stats"] = statsPanel("en", 1, db.Stats{}, false, "", true)
+	_, screens["help"] = infoPanel("en", 1, true, "help.title", "help.body", "bot", "searchybot")
+	_, screens["about"] = aboutPanel("en", 1, true)
+
+	for name, kb := range screens {
+		var primaries []string
+		for _, row := range kb.InlineKeyboard {
+			for _, button := range row {
+				if button.Style == tg.StylePrimary {
+					primaries = append(primaries, button.Text)
+				}
+			}
+		}
+		if len(primaries) > 1 {
+			t.Errorf("%s singles out nothing: %d primaries %v", name, len(primaries), primaries)
+		}
+	}
+	if button, ok := findButton(screens["home.dm"], "m:1:language"); !ok || button.Style != tg.StylePrimary {
+		t.Errorf("the DM home does not lead with Language: %q", button.Style)
+	}
+	// The group home leads by position with a SwitchInlineQuery button, which
+	// is the one thing everyone in the room can act on.
+	for _, row := range screens["home.group"].InlineKeyboard {
+		for _, button := range row {
+			if button.Style == tg.StylePrimary {
+				t.Errorf("the group home colours %q; the inline-search button already leads by position", button.Text)
+			}
+		}
+	}
+}
+
+// Close is written in exactly one place, so the word and the destructive colour
+// cannot drift apart. Every Close in the bot comes from closeButton.
+func TestEveryCloseIsDanger(t *testing.T) {
+	screens := map[string]*tg.InlineKeyboardMarkup{}
+	_, screens["home.group"] = homePanel("en", "searchybot", "vidobot", 1, true)
+	_, screens["language"] = languagePanel("en", 1, true)
+	_, screens["stats"] = statsPanel("en", 1, db.Stats{}, false, "", true)
+	_, screens["help"] = infoPanel("en", 1, true, "help.title", "help.body", "bot", "searchybot")
+	_, screens["about"] = aboutPanel("en", 1, true)
+	screens["grid"] = gridKeyboard("en", "tok", 0, 3)
+
+	closeLabel := i18n.T("en", "action.close")
+	for name, kb := range screens {
+		found := false
+		for _, row := range kb.InlineKeyboard {
+			for _, button := range row {
+				if button.Text != closeLabel {
+					continue
+				}
+				found = true
+				if button.Style != tg.StyleDanger {
+					t.Errorf("%s: Close has style %q, want Danger — it dismisses the panel", name, button.Style)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s has no Close", name)
+		}
+	}
+}
+
+// "Follow Telegram" deletes this bot's manual claim so the Telegram hint wins
+// again. It belongs under the grid and above the nav row, and it must be
+// translated everywhere or a Czech picker grows one English button.
+func TestLanguagePanelOffersFollowTelegramBelowTheGrid(t *testing.T) {
+	_, kb := languagePanel("en", 1, true)
+	rows := kb.InlineKeyboard
+	follow := -1
+	for i, row := range rows {
+		for _, button := range row {
+			if button.CallbackData == "m:1:lfollow" {
+				follow = i
+			}
+		}
+	}
+	if follow < 0 {
+		t.Fatal("the language screen has no way back to the Telegram language")
+	}
+	if follow != len(rows)-2 {
+		t.Fatalf("Follow Telegram is row %d of %d; it belongs below the grid and above the nav row", follow, len(rows))
+	}
+	if len(rows[follow]) != 1 {
+		t.Fatalf("Follow Telegram shares its row with %d other buttons", len(rows[follow])-1)
+	}
+	for _, language := range i18n.LANGUAGE_OPTIONS {
+		value := i18n.T(language.Code, "btn.follow_telegram")
+		if value == "" || strings.HasPrefix(value, "[") {
+			t.Errorf("%s has no btn.follow_telegram", language.Code)
+		}
+	}
+}
+
+// Every screen's text comes from the shared helpers. A panel that builds its own
+// <b>…</b>/<i>…</i> pair is how the family shape drifted apart in the first place.
+func TestEveryScreenIsBuiltFromTheSharedHelpers(t *testing.T) {
+	texts := map[string]string{}
+	texts["home.dm"], _ = homePanel("en", "searchybot", "vidobot", 1, false)
+	texts["home.group"], _ = homePanel("en", "searchybot", "vidobot", 1, true)
+	texts["language"], _ = languagePanel("en", 1, false)
+	texts["stats.empty"], _ = statsPanel("en", 1, db.Stats{PeakHour: -1}, false, "", false)
+	texts["stats.global"], _ = statsPanel("en", 1,
+		db.Stats{Searches: 3, Sent: 2, PhotoSent: 1, VideoSent: 1, Users: 4, PeakHour: 9}, true, "12:00 09.09.2026", false)
+	texts["help"], _ = infoPanel("en", 1, false, "help.title", "help.body", "bot", "searchybot")
+	texts["about"], _ = aboutPanel("en", 1, false)
+	texts["grid"] = gridCaption("en", 0, 30)
+
+	for name, text := range texts {
+		if !strings.HasPrefix(text, "<b>") {
+			t.Errorf("%s does not open with a bold title: %q", name, text)
+		}
+		// Two screens have no text substance to quote: the language picker's
+		// content is its keyboard, and the grid's is the collage above it.
+		if name == "language" || name == "grid" {
+			continue
+		}
+		if !strings.Contains(text, "<blockquote>") {
+			t.Errorf("%s puts its substance outside a blockquote: %q", name, text)
+		}
+	}
+	// The About card is the family's one-line variant: name · version.
+	if !strings.HasPrefix(texts["about"], "<b>Searchy</b> · <i>v") {
+		t.Errorf("the About card lost its name · version line: %q", texts["about"])
+	}
+}
+
+func findButton(kb *tg.InlineKeyboardMarkup, data string) (tg.InlineKeyboardButton, bool) {
+	for _, row := range kb.InlineKeyboard {
+		for _, button := range row {
+			if button.CallbackData == data {
+				return button, true
+			}
+		}
+	}
+	return tg.InlineKeyboardButton{}, false
 }
 
 func hasCallback(kb *tg.InlineKeyboardMarkup, data string) bool {

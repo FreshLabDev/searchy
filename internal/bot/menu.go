@@ -14,11 +14,19 @@ import (
 
 // Menu navigation is callback-driven (vido style): /start posts a panel and each
 // button edits it in place. Callback data: "m:<owner>:<action>" where action ∈
-// {home, language, statsp, statsg, help, about, close} or "l|<code>".
+// {home, language, lfollow, statsp, statsg, help, about, close} or "l|<code>".
 //
 // Formatting follows vido's rule exactly: a header of <b>title</b> + <i>hint</i>,
-// then a <blockquote> of content lines. Toggle marks use ◉ / ◎.
+// then a <blockquote> of content lines. Selection marks use ◉ / ◎.
 const menuPrefix = "m"
+
+// Selection marks. Both states are drawn, always: a set where only the chosen
+// option carries a glyph has one row starting two characters in from all the
+// others, which reads as a typo rather than as state.
+const (
+	markOn  = "◉ "
+	markOff = "◎ "
+)
 
 func cb(owner int64, action string) string {
 	return menuPrefix + ":" + strconv.FormatInt(owner, 10) + ":" + action
@@ -38,13 +46,26 @@ func parseMenuCB(data string) (owner int64, action string, ok bool) {
 
 func strptr(s string) *string { return &s }
 
-// header builds vido's <b>title</b> + optional <i>hint</i>.
-func header(lang, titleKey, hintKey string) string {
-	s := "<b>" + i18n.T(lang, titleKey) + "</b>"
-	if hintKey != "" {
-		s += "\n<i>" + i18n.T(lang, hintKey) + "</i>"
+// titleCard is the single place this bot writes a panel's <b>title</b>/<i>hint</i>
+// pair, so no screen can invent its own. The separator is the only thing that
+// varies, and it varies exactly once: the family's About card is specified as
+// "<b>Name</b> · <i>vX.Y.Z</i>" on one line, every other panel puts the hint
+// on the line below.
+func titleCard(title, hint, sep string) string {
+	s := "<b>" + title + "</b>"
+	if hint != "" {
+		s += sep + "<i>" + hint + "</i>"
 	}
 	return s
+}
+
+// header builds vido's <b>title</b> + optional <i>hint</i> from translation keys.
+func header(lang, titleKey, hintKey string) string {
+	hint := ""
+	if hintKey != "" {
+		hint = i18n.T(lang, hintKey)
+	}
+	return titleCard(i18n.T(lang, titleKey), hint, "\n")
 }
 
 // blockquote wraps lines in Telegram's <blockquote>, vido style.
@@ -55,18 +76,25 @@ func blockquote(lines ...string) string {
 	return "<blockquote>" + strings.Join(lines, "\n") + "</blockquote>"
 }
 
-func tabMark(active bool) string {
+// stateMark marks one option out of a set — a language in the grid, a tab in
+// the statistics panel. Both are the same idea ("this is the one you are on"),
+// so they mark it the same way, and both states are always drawn.
+func stateMark(active bool) string {
 	if active {
-		return "◉ "
+		return markOn
 	}
-	return "◎ "
+	return markOff
 }
 
-func curMark(active bool) string {
-	if active {
-		return "◉ "
+// closeButton is the only place this bot writes Close. Every Close in the
+// codebase comes from here, so the word and the destructive colour cannot
+// drift apart again: Close dismisses the panel, and dismissal is Danger.
+func closeButton(lang, data string) tg.InlineKeyboardButton {
+	return tg.InlineKeyboardButton{
+		Text:         i18n.T(lang, "action.close"),
+		CallbackData: data,
+		Style:        tg.StyleDanger,
 	}
-	return ""
 }
 
 // navRow is the row every subordinate panel ends with.
@@ -81,9 +109,7 @@ func navRow(lang string, owner int64, inGroup bool) []tg.InlineKeyboardButton {
 		{Text: i18n.T(lang, "action.back"), CallbackData: cb(owner, "home")},
 	}
 	if inGroup {
-		row = append(row, tg.InlineKeyboardButton{
-			Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close"),
-		})
+		row = append(row, closeButton(lang, cb(owner, "close")))
 	}
 	return row
 }
@@ -105,7 +131,9 @@ func personalHome(lang, botUsername, vidoBotUsername string, owner int64) (strin
 		blockquote(i18n.T(lang, "home.hint", "bot", botUsername))
 	rows := [][]tg.InlineKeyboardButton{
 		{
-			{Text: i18n.T(lang, "btn.language"), CallbackData: cb(owner, "language")},
+			// The one highlighted button on this screen: nothing else here is
+			// readable until the language is right.
+			{Text: i18n.T(lang, "btn.language"), CallbackData: cb(owner, "language"), Style: tg.StylePrimary},
 			{Text: i18n.T(lang, "btn.stats"), CallbackData: cb(owner, "statsp")},
 		},
 		{
@@ -143,30 +171,48 @@ func groupHome(lang, botUsername string, owner int64) (string, *tg.InlineKeyboar
 			URL:  "https://t.me/" + botUsername,
 		}})
 	}
-	rows = append(rows, []tg.InlineKeyboardButton{{
-		Text: i18n.T(lang, "action.close"), CallbackData: cb(owner, "close"),
-	}})
+	// Home has nothing above it, so it ends with Close alone rather than with
+	// navRow, whose "Back" would point at the screen you are already on. The
+	// Close itself is the shared one, so it cannot drift from the others.
+	rows = append(rows, []tg.InlineKeyboardButton{closeButton(lang, cb(owner, "close"))})
 	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-// languagePanel — the language picker (2 per row), current one marked with ◉.
+// languagePanel — the language picker (2 per row), every option marked, the
+// current one green. Below the grid sits the way back out of a manual choice.
 func languagePanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	text := header(lang, "language.title", "language.hint")
 	opts := i18n.LANGUAGE_OPTIONS
-	var rows [][]tg.InlineKeyboardButton
+	rows := make([][]tg.InlineKeyboardButton, 0, (len(opts)+1)/2+2)
 	for i := 0; i < len(opts); i += 2 {
-		row := []tg.InlineKeyboardButton{
-			{Text: curMark(opts[i].Code == lang) + opts[i].Label, CallbackData: cb(owner, "l|"+opts[i].Code)},
-		}
+		row := []tg.InlineKeyboardButton{languageButton(opts[i], lang, owner)}
 		if i+1 < len(opts) {
-			row = append(row, tg.InlineKeyboardButton{
-				Text: curMark(opts[i+1].Code == lang) + opts[i+1].Label, CallbackData: cb(owner, "l|"+opts[i+1].Code),
-			})
+			row = append(row, languageButton(opts[i+1], lang, owner))
 		}
 		rows = append(rows, row)
 	}
+	// Handing the choice back to Telegram is not a seventeenth language, so it
+	// carries no selection mark — and it is not what a person came here to do,
+	// so it carries no colour either.
+	rows = append(rows, []tg.InlineKeyboardButton{{
+		Text: i18n.T(lang, "btn.follow_telegram"), CallbackData: cb(owner, "lfollow"),
+	}})
 	rows = append(rows, navRow(lang, owner, inGroup))
 	return text, &tg.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// languageButton paints the current language Success and nothing else: one
+// green button in a grid of sixteen answers "which one am I on?" before the
+// glyph in front of the label is read.
+func languageButton(opt i18n.LangOption, lang string, owner int64) tg.InlineKeyboardButton {
+	btn := tg.InlineKeyboardButton{
+		Text:         stateMark(opt.Code == lang) + opt.Label,
+		CallbackData: cb(owner, "l|"+opt.Code),
+	}
+	if opt.Code == lang {
+		btn.Style = tg.StyleSuccess
+	}
+	return btn
 }
 
 // statsPanel — personal or global stats (vido formatting). No query text anywhere.
@@ -180,7 +226,7 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 	b.WriteString("\n\n")
 
 	if st.Searches == 0 && st.Sent == 0 {
-		b.WriteString(i18n.T(lang, "stats.empty"))
+		b.WriteString(blockquote(i18n.T(lang, "stats.empty")))
 	} else {
 		b.WriteString(blockquote(
 			i18n.T(lang, "stats.field.searches", "count", i64(st.Searches)),
@@ -189,7 +235,7 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 			i18n.T(lang, "stats.field.peak", "peak", peakLabel(st.PeakHour)),
 		))
 		if global && st.Users > 0 {
-			b.WriteString("\n\n<b>" + i18n.T(lang, "stats.meta.title") + "</b>\n")
+			b.WriteString("\n\n" + header(lang, "stats.meta.title", "") + "\n")
 			b.WriteString(blockquote(i18n.T(lang, "stats.meta.users", "count", i64(st.Users))))
 		}
 		if updated != "" {
@@ -198,11 +244,23 @@ func statsPanel(lang string, owner int64, st db.Stats, global bool, updated stri
 		}
 	}
 
+	personal := tg.InlineKeyboardButton{
+		Text: stateMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp"),
+	}
+	worldwide := tg.InlineKeyboardButton{
+		Text: stateMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg"),
+	}
+	// The open tab says which set of numbers is on screen. That is a state, not
+	// an action — pressing it does nothing — so it is Success, not Primary, and
+	// the panel keeps its one Primary slot free.
+	if global {
+		worldwide.Style = tg.StyleSuccess
+	} else {
+		personal.Style = tg.StyleSuccess
+	}
+
 	kb := &tg.InlineKeyboardMarkup{InlineKeyboard: [][]tg.InlineKeyboardButton{
-		{
-			{Text: tabMark(!global) + i18n.T(lang, "stats.button.personal"), CallbackData: cb(owner, "statsp")},
-			{Text: tabMark(global) + i18n.T(lang, "stats.button.global"), CallbackData: cb(owner, "statsg")},
-		},
+		{personal, worldwide},
 		navRow(lang, owner, inGroup),
 	}}
 	return b.String(), kb
@@ -224,12 +282,13 @@ func infoPanel(lang string, owner int64, inGroup bool, titleKey, bodyKey string,
 // one action is one too many.
 func aboutPanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeyboardMarkup) {
 	var b strings.Builder
-	b.WriteString("<b>Searchy</b> · <i>v" + aboutVersion(buildinfo.Version) + "</i>\n")
+	// Same title card as every other screen; the About card is the one place
+	// the family writes the hint (here, the version) on the title's own line.
+	b.WriteString(titleCard("Searchy", "v"+aboutVersion(buildinfo.Version), " · ") + "\n")
 	b.WriteString(i18n.T(lang, "about.tagline"))
 	b.WriteString("\n\n")
 	b.WriteString(blockquote(
 		aboutField(lang, "about.field.search", i18n.T(lang, "about.value.search")),
-		aboutField(lang, "about.field.build", buildDate()),
 		aboutField(lang, "about.field.source", `<a href="https://github.com/FreshLabDev/searchy">FreshLabDev/searchy</a> · Apache-2.0`),
 		aboutField(lang, "about.field.admin", `<a href="https://t.me/amtiyo">@amtiyo</a>`),
 	))
@@ -241,15 +300,6 @@ func aboutPanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeybo
 
 func aboutField(lang, labelKey, value string) string {
 	return i18n.T(lang, labelKey) + " · " + value
-}
-
-// buildDate is the stamp CI puts in the binary. An unstamped local build says
-// "unknown", which is a fact worth showing rather than an empty line.
-func buildDate() string {
-	if date := strings.TrimSpace(buildinfo.Date); date != "" {
-		return escapeHTML(date)
-	}
-	return "unknown"
 }
 
 func aboutVersion(version string) string {
