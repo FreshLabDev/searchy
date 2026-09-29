@@ -5,6 +5,12 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # Weekly, so a new advisory against a dependency or the standard library is
+  # noticed while nothing is being pushed.
+  schedule:
+    - cron: "23 5 * * 1"
+  # release.yml runs this before it publishes anything.
+  workflow_call:
 
 permissions:
   contents: read

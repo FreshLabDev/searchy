@@ -51,9 +51,11 @@ A pre-release is tagged on `dev`. Nothing merges anywhere.
    git push origin v1.2.3-alpha.4
    ```
 
-The tag push runs `.github/workflows/release.yml`, which re-runs the checks,
+The tag push runs `.github/workflows/release.yml`. It runs CI (`ci.yml`) on
+the tagged commit first and publishes nothing unless it passed; then it
 refuses the tag if it is not on `dev` or has no changelog section, builds and
-publishes the image, and creates the GitHub Release marked as a pre-release.
+publishes the image, adds its digest to the notes, and creates the GitHub
+Release marked as a pre-release.
 
 Then point the test bot at it. A pre-release nobody ran is a pre-release that
 proved nothing.
@@ -82,6 +84,19 @@ A stable version is tagged on `main`, on the merge commit.
    ```
 
 5. Deploy it, and check the running version says what it should.
+
+## Publishing without CI
+
+A pushed tag publishes only after CI passed on the tagged commit. When CI could
+not run (an Actions outage, a spending limit) or failed for a reason that is not
+the code, and the release cannot wait, publish the existing tag by hand:
+
+```sh
+gh workflow run release.yml -f tag=v1.2.3 -f reason="why CI is skipped"
+```
+
+That run skips CI and puts the reason at the top of the GitHub Release, so the
+release itself says it was not checked.
 
 ## Rolling back
 
