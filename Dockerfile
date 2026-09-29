@@ -25,7 +25,10 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # nothing else — tiny and no shell.
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG VERSION=0.2.0-alpha.2
-LABEL org.opencontainers.image.version=${VERSION}
+ARG COMMIT=none
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.source="https://github.com/FreshLabDev/searchy"
 COPY --from=build /out/searchy /usr/local/bin/searchy
 
 EXPOSE 8081
