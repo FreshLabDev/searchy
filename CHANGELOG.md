@@ -13,6 +13,23 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.3 - 2026-10-20
+
+Searchy is built with Go 1.26.10, which closes nine standard-library advisories
+its code reaches in the image running since September. Nothing changes in what
+the bot does or how it is configured.
+
+There was no pre-release: the bot's code did not change, only the Go release it
+is compiled with and the release machinery below, and the patch Go releases
+between 1.26.6 and 1.26.10 are security fixes.
+
+### Security
+
+- Go moves from 1.26.6 to 1.26.10 (`go.mod` and the build image). `govulncheck`
+  found nine advisories reachable from Searchy on 1.26.6, among them
+  GO-2026-6611, -6612, -6613 and -6617 in `net/http` and HTTP/2; on 1.26.10 it
+  finds none.
+
 ### Changed
 
 - **A release waits for CI.** `release.yml` runs `ci.yml` on the tagged commit

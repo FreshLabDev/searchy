@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 module searchy
 
-go 1.26.6
+go 1.26.10
 
 require (
 	github.com/FreshLabDev/tg v0.1.0
