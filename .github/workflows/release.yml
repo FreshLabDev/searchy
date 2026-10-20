@@ -1,77 +1,102 @@
 # SPDX-License-Identifier: Apache-2.0
+# Publishes the image and the GitHub Release for a tag. See docs/releases.md.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  # The way round CI, for when it could not run on the tagged commit (an Actions
+  # outage, a spending limit) and the release cannot wait. It cannot happen by
+  # accident: it is started by hand, names a tag that already exists, and the
+  # reason is printed at the top of the release notes.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish without running CI
+        required: true
+        type: string
+      reason:
+        description: Why CI is skipped (printed at the top of the release notes)
+        required: true
+        type: string
 
 permissions:
   contents: write
   packages: write
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  ci:
+    name: CI
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
     name: Build image and publish release
+    needs: ci
+    # A pushed tag publishes only after CI passed on it; the manual run above is
+    # the only way to publish without that, and it says so in the notes.
+    if: ${{ !cancelled() && (needs.ci.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      SKIP_REASON: ${{ inputs.reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
 
       - name: Require the tag on the branch its channel is published from
+        id: meta
         # docs/versioning.md: pre-releases are tagged on dev, stable releases on
         # main. A stable tag that never went through main would publish
         # something the production branch has not seen.
         run: |
-          if printf '%s' "${GITHUB_REF_NAME}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
+          commit=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          if printf '%s' "${TAG}" | grep -Eq -- '-(alpha|beta|rc)\.'; then
             branch=dev
-          else
-            branch=main
-          fi
-          git fetch --no-tags origin "${branch}:refs/remotes/origin/${branch}"
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${branch}"; then
-            echo "tag ${GITHUB_REF_NAME} is not an ancestor of origin/${branch}"
-            exit 1
-          fi
-
-
-      - name: Resolve build metadata
-        id: meta
-        run: |
-          version="${GITHUB_REF_NAME}"
-          echo "version=${version}" >>"$GITHUB_OUTPUT"
-          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$GITHUB_OUTPUT"
-          # Tags carrying a pre-release suffix (-alpha/-beta/-rc) are marked as
-          # GitHub pre-releases.
-          if printf '%s' "${version}" | grep -q '-'; then
             echo "prerelease=true" >>"$GITHUB_OUTPUT"
           else
+            branch=main
             echo "prerelease=false" >>"$GITHUB_OUTPUT"
           fi
-
-      - name: Lowercase image name
-        id: image
-        run: echo "repo=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_OUTPUT"
+          git fetch --no-tags origin "${branch}:refs/remotes/origin/${branch}"
+          if ! git merge-base --is-ancestor "${commit}" "origin/${branch}"; then
+            echo "tag ${TAG} is not an ancestor of origin/${branch}"
+            exit 1
+          fi
+          echo "commit=${commit}" >>"$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_OUTPUT"
 
       - name: Extract changelog section
         id: changelog
         run: |
-          version="${GITHUB_REF_NAME}"
           notes_file="$(mktemp)"
-          # CHANGELOG headings are plain "## vX.Y.Z - <date>". Match by literal
-          # prefix AND a boundary (space or end-of-line) so e.g. "## v0.1.0" does
-          # not capture "## v0.1.0-alpha.1".
-          awk -v ver="## ${version}" '
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
+            printf '> **Published without CI.** %s\n\n' "${SKIP_REASON}" >"${notes_file}"
+          fi
+          # Match the heading by literal prefix AND a boundary (space or
+          # end-of-line) so e.g. "## v1.0.0" does not capture "## v1.0.0-alpha.1".
+          section="$(mktemp)"
+          awk -v ver="## ${TAG}" '
             index($0, ver) == 1 && (length($0) == length(ver) || substr($0, length(ver) + 1, 1) == " ") { capture=1; next }
             capture && /^## / { exit }
             capture { print }
-          ' CHANGELOG.md >"${notes_file}"
-          if [ ! -s "${notes_file}" ]; then
+          ' CHANGELOG.md >"${section}"
+          if [ ! -s "${section}" ]; then
             # A release whose notes are the word "Release" tells nobody anything,
             # and the changelog section is the only place they are written.
-            echo "CHANGELOG.md has no '## ${GITHUB_REF_NAME}' section"
+            echo "CHANGELOG.md has no '## ${TAG}' section"
             exit 1
           fi
+          cat "${section}" >>"${notes_file}"
           echo "file=${notes_file}" >>"$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
@@ -85,35 +110,39 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
           tags: |
-            ${{ steps.image.outputs.repo }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:${{ env.TAG }}
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
-            COMMIT=${{ github.sha }}
+            VERSION=${{ env.TAG }}
+            COMMIT=${{ steps.meta.outputs.commit }}
             DATE=${{ steps.meta.outputs.date }}
 
-      - name: Create GitHub Release
+      - name: Record the image digest
+        # docs/releases.md tells the operator to pin this digest; the notes are
+        # where it is read from.
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          NOTES_FILE: ${{ steps.changelog.outputs.file }}
+        run: |
+          printf '\n### Container image\n\n`%s@%s`\n' "$IMAGE" "$DIGEST" >>"$NOTES_FILE"
+
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES_FILE: ${{ steps.changelog.outputs.file }}
         run: |
           flags=""
           if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
             flags="--prerelease"
           fi
-          # Idempotent: update the release if it already exists (e.g. created
-          # manually or on a re-run), otherwise create it.
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release edit "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes-file "${{ steps.changelog.outputs.file }}" \
-              ${flags}
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release edit "${TAG}" --title "${TAG}" --notes-file "${NOTES_FILE}" ${flags}
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes-file "${{ steps.changelog.outputs.file }}" \
-              ${flags}
+            gh release create "${TAG}" --verify-tag --title "${TAG}" --notes-file "${NOTES_FILE}" ${flags}
           fi

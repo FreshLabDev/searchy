@@ -13,6 +13,37 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 Use this section for changes that are merged but not released yet.
 
+## v0.2.3 - 2026-10-20
+
+Searchy is built with Go 1.26.10, which closes nine standard-library advisories
+its code reaches in the image running since September. Nothing changes in what
+the bot does or how it is configured.
+
+There was no pre-release: the bot's code did not change, only the Go release it
+is compiled with and the release machinery below, and the patch Go releases
+between 1.26.6 and 1.26.10 are security fixes.
+
+### Security
+
+- Go moves from 1.26.6 to 1.26.10 (`go.mod` and the build image). `govulncheck`
+  found nine advisories reachable from Searchy on 1.26.6, among them
+  GO-2026-6611, -6612, -6613 and -6617 in `net/http` and HTTP/2; on 1.26.10 it
+  finds none.
+
+### Changed
+
+- **A release waits for CI.** `release.yml` runs `ci.yml` on the tagged commit
+  and publishes nothing unless it passed. When CI cannot run, `release.yml` can
+  be started by hand with the tag and a reason; that run skips CI and prints the
+  reason at the top of the release notes. See `docs/releases.md`.
+- The release notes end with the image digest to pin, which `docs/releases.md`
+  already said they did.
+- The image carries an `org.opencontainers.image.revision` label beside the
+  version, so `docker inspect` names the build without starting it.
+- CI also runs weekly, so a new advisory against a dependency or the standard
+  library is noticed while nothing is being pushed.
+- Dependabot opens grouped version updates against `dev`.
+
 ## v0.2.2 - 2026-09-10
 
 A language picked by hand can be handed back, and the sixteen-button grid stops
