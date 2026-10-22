@@ -12,20 +12,28 @@ private by design, and production-minded.
 ## Project Shape
 
 - Searchy is one Go service (module `searchy`).
-- It searches images and videos through a self-hosted **SearXNG** instance over
-  its JSON API.
+- Its default backend is native Go metasearch: direct Bing and DuckDuckGo
+  image/video adapters, plus Wikimedia images. No AI model, Python search
+  service, or separate search index is required.
+- `SEARCH_BACKEND=searxng` selects the existing private SearXNG JSON backend for
+  rollback. With native selected, `SEARCH_FALLBACK=searxng` allows bounded
+  fallback on weak or empty results; `none` disables it.
 - Telegram uses long polling; the bot makes only outbound connections (no public
   routes).
 - Two Postgres connections are used and **both are optional**:
   - `DATABASE_URL` — searchy's own private search analytics.
   - `CORE_DATABASE_URL` — the shared cross-bot **core** hub (identity, presence,
     language).
-- Search itself is stateless and cache-fronted; nothing about a query is written
-  to disk.
+- Search has only bounded, expiring in-memory result caches and pagination
+  sessions; nothing about a query is written to disk. No new database is needed.
 
 ## Hard Product Boundaries
 
 - Two media categories only: **images** and **videos** (`i:` / `v:` prefixes).
+- `f:` aliases normal fast search, with the same sources and ranking and no AI.
+  Leading mode/category prefixes can be combined in either order (`f: v:` or
+  `v: f:`); do not rewrite prefix-like text inside the query. Plain queries use
+  the same mode. Do not add an `ai:` mode as part of this backend migration.
 - Inline search is the primary surface; DM and group search use a numbered grid.
 - The `/start` menu is inline and callback-driven (language, stats, help, about).
 - In groups, searching is explicit via `/search`; plain messages are ignored.
@@ -41,7 +49,7 @@ private by design, and production-minded.
 
 - **Never store the query text** — not in the analytics DB, not in logs, not in
   in-memory grid sessions. Only counts, timings, category, result type, and the
-  SearXNG engine may be recorded.
+  source/engine may be recorded.
 - Analytics rows key on the raw Telegram user id with no query, title, or URL.
 - Do not log the query text anywhere, including on errors or degraded-engine
   warnings.
@@ -59,12 +67,38 @@ private by design, and production-minded.
 - Every `db.Store` and `core.Core` method must stay nil-safe: an unset or
   unreachable database makes the call a harmless no-op so search keeps working.
 
-## SearXNG Invariants
+## Search Backend Invariants
+
+- Native retrieval is incremental. Freeze each returned inline page; late
+  results may only enter later pages. Never try to push updates into an already
+  answered Telegram inline picker.
+- Native `next_offset` values are opaque, fit Telegram's 64-byte limit, and bind
+  a page to the user, query digest, language, category, and filters. Replaying a
+  cursor returns the same page; expiration and invalid cursors are explicit.
+- Retain no raw query in native sessions. Use a process-local HMAC for query
+  identity; keep caches/sessions bounded in size and time. Cancellation of one
+  caller must not cancel shared work needed by another caller.
+- Defaults: `NATIVE_FIRST_PAGE_WAIT=800ms`, `NATIVE_TIMEOUT=3.5s`,
+  `REQUEST_TIMEOUT=8s` including fallback, `SEARCH_MAX_CONCURRENT=8`, and
+  `CACHE_TTL=5m`. Enforce bounded per-user and per-source work as well. Do not
+  cache failed or degraded responses as complete healthy results for five minutes.
+- Preserve operator `LANGUAGE`, per-user language, and `SAFE_SEARCH` in native
+  adapters. Source markup can change; cover parsers with public saved fixtures
+  and keep query-free source timing/error diagnostics.
+- Validate every inline media/button URL as strict HTTPS before answering: one
+  bad URL rejects the whole `answerInlineQuery`. Browser-displayable media is
+  not sufficient evidence of Telegram compatibility. Normalize/filter unsupported
+  formats at the source boundary and use a provider's compatible preview when
+  needed; inline photo URLs and video covers must be Telegram-compatible JPEGs.
+- Any server-side media fetching must reject private addresses and unsafe
+  redirects and enforce response size limits. Keep the Vido cache/path rules.
+
+### SearXNG fallback and switchback
 
 - Query with a pinned `engines=` set; **never** send `categories` (it fans out to
   every enabled engine and overloads a private instance).
-- Validate every inline media/button URL as strict HTTPS before answering — one
-  bad URL rejects the whole `answerInlineQuery`.
+- `ENGINES_*`, `DISCOVERY_*`, and `IMAGE_PROXY` configure only SearXNG. Do not
+  silently apply legacy engine pools or discovery quotas to native search.
 - Surface a `403` on `format=json` as a clear "enable JSON format" error.
 - Keep the SearXNG instance internal-only; `IMAGE_PROXY` stays `false` unless the
   instance itself is publicly reachable over HTTPS.
@@ -141,7 +175,14 @@ docker compose -f deploy/docker-compose.yml config
 - Inline search returns image and video cards and pages with `next_offset`.
 - DM plain-text search and group `/search` both return a numbered grid; paging
   and per-item pick work.
-- Category prefixes (`i:` / `v:`) narrow correctly.
+- Category prefixes (`i:` / `v:`) narrow correctly, with `f:` combinations in
+  either order matching normal search.
+- Native pages replay unchanged, late results do not reorder returned cards,
+  and expired cursors, source failures, cancellation, and concurrency limits
+  are tested. Partial/degraded results are not cached as healthy complete pages.
+- `SEARCH_BACKEND=searxng` switches back successfully; fallback stays inside
+  the overall request deadline, and `SEARCH_FALLBACK=none` works without SearXNG.
+- Verify actual Telegram media delivery, not just an HTML thumbnail preview.
 - A SearXNG `403` (JSON off) surfaces as a clear error, not a silent empty.
 - Language picker persists a choice and it survives a restart (via core).
 - `/stats` renders personal and global tabs when `DATABASE_URL` is set, and the

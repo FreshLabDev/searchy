@@ -11,7 +11,27 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
-Use this section for changes that are merged but not released yet.
+### Changed
+
+- Native Go metasearch is the default backend: direct Bing and DuckDuckGo
+  images/videos, plus Wikimedia images. No AI model or separate Python search
+  service is required. The existing SearXNG backend remains available with
+  `SEARCH_BACKEND=searxng` for a compatible switchback.
+- Native inline retrieval collects a partial first page, freezes returned
+  cards, and adds later results through stable opaque pagination. Telegram's
+  already-answered inline picker is not updated in place. DM/group grids and
+  owner-bound Vido delivery keep their existing behavior.
+- `f:` explicitly selects the same fast, non-AI search as an ordinary query.
+  Combine it with `i:` or `v:` in either order, including in `/search`.
+- Native search defaults to an `800ms` first-page collection window and `3.5s`
+  source budget, with up to eight concurrent searches. Optional SearXNG fallback
+  stays within the overall `8s` request budget; `SEARCH_FALLBACK=none` disables
+  it. These are operating budgets, not measured production latency guarantees.
+- Result caches and pagination sessions are bounded in memory with a default
+  five-minute TTL. Raw query text stays out of sessions, logs, and databases;
+  partial/degraded responses are not cached as complete healthy results.
+- Local Compose retains private SearXNG for fallback and rollback without public
+  ports. Native-only startup can run just the bot. Search needs no new database.
 
 ## v0.2.3 - 2026-10-20
 

@@ -6,12 +6,14 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/FreshLabDev/tg"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
@@ -23,9 +25,6 @@ import (
 	vidobridge "searchy/internal/vido"
 )
 
-// maxPages bounds inline pagination so scrolling can't drive SearXNG forever.
-const maxPages = 10
-
 // resultMeta is what we remember about an answered inline result so that, when
 // the user picks it, we can record what KIND of thing was sent — never the
 // content itself (no title/url/query is ever stored).
@@ -35,7 +34,7 @@ type resultMeta struct {
 }
 
 type Handlers struct {
-	agg             *search.Aggregator
+	backend         search.Backend
 	api             *tg.Client
 	deb             *debouncer
 	log             *slog.Logger
@@ -64,6 +63,7 @@ type Handlers struct {
 }
 
 type Options struct {
+	Backend         search.Backend
 	Aggregator      *search.Aggregator
 	Telegram        *tg.Client
 	Logger          *slog.Logger
@@ -83,8 +83,12 @@ type Options struct {
 }
 
 func NewHandlers(o Options) *Handlers {
+	backend := o.Backend
+	if backend == nil {
+		backend = search.LegacyBackend{Aggregator: o.Aggregator, Shared: true}
+	}
 	return &Handlers{
-		agg:             o.Aggregator,
+		backend:         backend,
 		api:             o.Telegram,
 		deb:             newDebouncer(o.DebounceDelay),
 		log:             o.Logger,
@@ -138,55 +142,64 @@ func (h *Handlers) onInline(ctx context.Context, iq *tg.InlineQuery) {
 	if iq.From.ID == 0 { // malformed update — From is required for debounce/analytics
 		return
 	}
-	raw := strings.TrimSpace(iq.Query)
-	if raw == "" {
-		lang := h.langCached(&iq.From)
-		h.answer(ctx, iq.ID, promptResult(lang, h.botUsername), "", 5)
-		return
-	}
-	// Resolve core once on a cold cache so a manual language choice also affects
-	// inline search after restart. Subsequent keystrokes stay on the fast cache.
-	lang := h.langResolve(ctx, &iq.From)
-
+	start := time.Now()
 	dctx, dcancel, ok := h.deb.gate(ctx, iq.From.ID)
 	defer dcancel()
 	if !ok {
 		return // superseded while typing
 	}
 
-	cats, q := parseQuery(raw)
-	if strings.TrimSpace(q) == "" {
-		h.answer(ctx, iq.ID, promptResult(lang, h.botUsername), "", 5)
+	// Even an empty/prefix-only query goes through the gate to cancel older work.
+	// Resolve core on a cold cache so a saved language also applies after restart.
+	lang := h.langResolve(dctx, &iq.From)
+	if dctx.Err() != nil {
 		return
 	}
-	page := decodeOffset(iq.Offset)
+	cats, q := parseQuery(iq.Query)
+	if strings.TrimSpace(q) == "" {
+		h.answer(dctx, iq.ID, promptResult(lang, h.botUsername), "", 5)
+		return
+	}
 
 	sctx, cancel := context.WithTimeout(dctx, h.requestTimeout)
 	defer cancel()
-	start := time.Now()
-	results, hasMore := h.agg.Search(sctx, q, cats, page, search.SearchLanguage(lang))
-	if dctx.Err() != nil {
+	page, err := h.backend.SearchPage(sctx, search.PageRequest{
+		Query: q, Categories: cats, Language: search.SearchLanguage(lang),
+		Offset: iq.Offset, UserID: iq.From.ID, Scope: "inline", Limit: min(h.maxResults, 24),
+	})
+	if dctx.Err() != nil || errors.Is(err, context.Canceled) {
 		return // superseded by a newer query
 	}
+	if err != nil {
+		h.answer(dctx, iq.ID, searchErrorResult(lang, err), "", 1)
+		if iq.Offset == "" {
+			h.recordSearch(&iq.From, categoryStr(cats), 0, int(time.Since(start).Milliseconds()), "inline")
+		}
+		return
+	}
 
-	downloadURLs := h.inlineDownloadURLs(dctx, &iq.From, results)
-	inline := buildInlineResults(results, lang, downloadURLs)
-	h.cacheMeta(results) // so chosen_inline_result can record what was sent
-	h.log.Info("inline", "page", page, "results", len(inline), "ms", time.Since(start).Milliseconds())
+	downloadURLs := h.inlineDownloadURLs(dctx, &iq.From, page.Results)
+	if dctx.Err() != nil {
+		return
+	}
+	inline := buildInlineResults(page.Results, lang, downloadURLs)
+	h.cacheMeta(page.Results) // so chosen_inline_result can record what was sent
+	h.log.Info("inline", "continuation", iq.Offset != "", "results", len(inline), "degraded", page.Degraded, "ms", time.Since(start).Milliseconds())
 
-	if page == 0 {
+	if iq.Offset == "" {
 		h.recordSearch(&iq.From, categoryStr(cats), len(inline), int(time.Since(start).Milliseconds()), "inline")
 		h.touchCore(&iq.From, nil) // inline has no chat context → DM/0 presence rollup
 	}
 
-	next := ""
-	if hasMore && len(inline) > 0 && page+1 < maxPages {
-		next = encodeOffset(page + 1)
-	}
-	if len(inline) == 0 && page == 0 {
+	if len(inline) == 0 && iq.Offset == "" {
 		inline = emptyResult(lang, q)
 	}
-	h.answer(ctx, iq.ID, inline, next, h.inlineCacheTime)
+	cacheTime := h.inlineCacheTime
+	if page.Degraded {
+		// tg's zero means Telegram's 300s default, so send an explicit short TTL.
+		cacheTime = 1
+	}
+	h.answer(dctx, iq.ID, inline, page.NextOffset, cacheTime)
 }
 
 func (h *Handlers) answer(ctx context.Context, id string, results []tg.InlineQueryResult, next string, cacheTime int) {
@@ -626,15 +639,23 @@ func parseCommand(text, botUsername string) (cmd, arg string, forUs bool) {
 }
 
 func parseQuery(raw string) ([]search.Category, string) {
-	low := strings.ToLower(raw)
-	switch {
-	case strings.HasPrefix(low, "i:"):
-		return []search.Category{search.CatImage}, strings.TrimSpace(raw[2:])
-	case strings.HasPrefix(low, "v:"):
-		return []search.Category{search.CatVideo}, strings.TrimSpace(raw[2:])
-	default:
-		return []search.Category{search.CatImage, search.CatVideo}, raw
+	q := strings.TrimSpace(raw)
+	cats := []search.Category{search.CatImage, search.CatVideo}
+	// Only the leading prefix chain is syntax. The last i:/v: wins; f: is an
+	// alias for ordinary fast search and never changes the category/source mix.
+	for len(q) >= 2 && q[1] == ':' {
+		switch q[0] {
+		case 'i', 'I':
+			cats = []search.Category{search.CatImage}
+		case 'v', 'V':
+			cats = []search.Category{search.CatVideo}
+		case 'f', 'F':
+		default:
+			return cats, q
+		}
+		q = strings.TrimLeftFunc(q[2:], unicode.IsSpace)
 	}
+	return cats, q
 }
 
 func categoryStr(cats []search.Category) string {

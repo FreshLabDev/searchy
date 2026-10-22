@@ -18,7 +18,9 @@ import (
 
 	"searchy/internal/httpx"
 	"searchy/internal/search"
+	"searchy/internal/search/native"
 	"searchy/internal/search/searxng"
+	"searchy/internal/search/stream"
 )
 
 type benchmarkCase struct {
@@ -30,11 +32,15 @@ type benchmarkCase struct {
 }
 
 type topResult struct {
-	Rank   int         `json:"rank"`
-	Title  string      `json:"title"`
-	Host   string      `json:"host"`
-	Engine string      `json:"engine"`
-	Pool   search.Pool `json:"pool,omitempty"`
+	Rank     int             `json:"rank"`
+	Title    string          `json:"title"`
+	Host     string          `json:"host"`
+	Engine   string          `json:"engine"`
+	Pool     search.Pool     `json:"pool,omitempty"`
+	Category search.Category `json:"category"`
+	MediaURL string          `json:"media_url,omitempty"`
+	ThumbURL string          `json:"thumb_url,omitempty"`
+	PageURL  string          `json:"page_url,omitempty"`
 }
 
 type runResult struct {
@@ -44,6 +50,8 @@ type runResult struct {
 	DiscoveryAt20   int         `json:"discovery_at_20"`
 	UsableHTTPSAt20 int         `json:"usable_https_at_20"`
 	ElapsedMillis   int64       `json:"elapsed_ms"`
+	Degraded        bool        `json:"degraded,omitempty"`
+	HasMore         bool        `json:"has_more,omitempty"`
 	Top             []topResult `json:"top,omitempty"`
 }
 
@@ -52,17 +60,21 @@ type caseReport struct {
 	Group     string     `json:"group"`
 	Legacy    *runResult `json:"legacy,omitempty"`
 	Candidate *runResult `json:"candidate,omitempty"`
+	Native    *runResult `json:"native,omitempty"`
 	Error     string     `json:"error,omitempty"`
 }
 
 type summary struct {
 	Cases                  int     `json:"cases"`
 	Empty                  int     `json:"empty"`
+	Failed                 int     `json:"failed"`
+	Degraded               int     `json:"degraded"`
 	AverageRelevantAt10    float64 `json:"average_keyword_relevant_at_10"`
 	AverageUniqueHostsAt10 float64 `json:"average_unique_hosts_at_10"`
 	AverageDiscoveryAt20   float64 `json:"average_discovery_at_20"`
 	UsableHTTPSRatio       float64 `json:"usable_https_ratio"`
 	P95Millis              int64   `json:"p95_ms"`
+	MedianMillis           float64 `json:"median_ms"`
 	MaxMillis              int64   `json:"max_ms"`
 }
 
@@ -72,19 +84,25 @@ type report struct {
 	Cases          []caseReport       `json:"cases"`
 	Legacy         *summary           `json:"legacy,omitempty"`
 	Candidate      *summary           `json:"candidate,omitempty"`
+	Native         *summary           `json:"native,omitempty"`
 	LegacyGroup    map[string]summary `json:"legacy_by_group,omitempty"`
 	CandidateGroup map[string]summary `json:"candidate_by_group,omitempty"`
+	NativeGroup    map[string]summary `json:"native_by_group,omitempty"`
+	Timing         string             `json:"timing,omitempty"`
 }
 
 func main() {
 	baseURL := flag.String("url", env("SEARXNG_URL", "http://localhost:8080"), "SearXNG base URL")
-	mode := flag.String("mode", "compare", "legacy, candidate, or compare")
+	mode := flag.String("mode", "compare", "legacy, candidate, compare, native, or compare-native")
 	limit := flag.Int("limit", 0, "run only the first N cases")
 	caseID := flag.String("case", "", "run one case by id")
 	summaryOnly := flag.Bool("summary-only", false, "omit top result titles")
 	timeout := flag.Duration("timeout", 8*time.Second, "per-case timeout")
 	flag.Parse()
-	if *mode != "legacy" && *mode != "candidate" && *mode != "compare" {
+	if *timeout <= 0 {
+		fatalf("timeout must be positive")
+	}
+	if *mode != "legacy" && *mode != "candidate" && *mode != "compare" && *mode != "native" && *mode != "compare-native" {
 		fatalf("invalid mode %q", *mode)
 	}
 
@@ -102,10 +120,21 @@ func main() {
 		EnginesImagesDiscovery: "findthatmeme,pinterest,giphy,frinkiac,wikicommons.images",
 		EnginesVideosDiscovery: "bilibili,peertube",
 	})
+	pageSize := 50
+	if *mode == "compare-native" {
+		pageSize = 24
+	}
 	candidate := search.NewAggregator(candidateProvider, search.AggregatorOptions{
-		CacheSize: 128, CacheTTL: time.Minute, MaxResults: 50, Timeout: *timeout,
+		CacheSize: 128, CacheTTL: time.Minute, MaxResults: pageSize, Timeout: *timeout,
 		DiscoveryPercent: 30, DiscoveryWeakPercent: 50, Logger: logger,
 	})
+	nativeEngine := stream.New(stream.Options{
+		Sources: native.NewSources(native.Options{HTTP: client}), Rank: native.Rank,
+		FirstPageWait: min(800*time.Millisecond, *timeout), NativeTimeout: min(3500*time.Millisecond, *timeout),
+		Timeout: *timeout, CacheTTL: time.Minute, CacheSize: 128, MaxResults: 24, MaxConcurrent: 8,
+		Logger: logger,
+	})
+	defer nativeEngine.Close()
 
 	cases := corpus()
 	if *caseID != "" {
@@ -124,6 +153,9 @@ func main() {
 		cases = cases[:*limit]
 	}
 	out := report{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Mode: *mode}
+	if *mode == "native" || *mode == "compare-native" {
+		out.Timing = "first page ready, 24 results maximum, retrieval cache cold per distinct case; excludes Telegram/debounce/Vido/client thumbnail loading; native has no SearXNG fallback; keyword relevance is only a text heuristic"
+	}
 	for _, benchmark := range cases {
 		group := groupOf(benchmark.ID)
 		row := caseReport{ID: benchmark.ID, Group: group}
@@ -135,12 +167,20 @@ func main() {
 				row.Legacy = &result
 			}
 		}
-		if *mode == "candidate" || *mode == "compare" {
+		if *mode == "candidate" || *mode == "compare" || *mode == "compare-native" {
 			result, err := runCandidate(candidate, benchmark, *timeout, *summaryOnly)
 			if err != nil {
 				row.Error = appendError(row.Error, "candidate", err)
 			} else {
 				row.Candidate = &result
+			}
+		}
+		if *mode == "native" || *mode == "compare-native" {
+			result, err := runNative(nativeEngine, benchmark, *timeout, *summaryOnly)
+			if err != nil {
+				row.Error = appendError(row.Error, "native", err)
+			} else {
+				row.Native = &result
 			}
 		}
 		out.Cases = append(out.Cases, row)
@@ -150,16 +190,44 @@ func main() {
 		out.Legacy = &value
 		out.LegacyGroup = summarizeGroups(out.Cases, true)
 	}
-	if *mode == "candidate" || *mode == "compare" {
+	if *mode == "candidate" || *mode == "compare" || *mode == "compare-native" {
 		value := summarize(out.Cases, false)
 		out.Candidate = &value
 		out.CandidateGroup = summarizeGroups(out.Cases, false)
+	}
+	if *mode == "native" || *mode == "compare-native" {
+		// Reuse the summary calculation without changing its historic schema.
+		rows := make([]caseReport, len(out.Cases))
+		for i, row := range out.Cases {
+			rows[i] = row
+			rows[i].Candidate = row.Native
+		}
+		value := summarize(rows, false)
+		out.Native = &value
+		out.NativeGroup = summarizeGroups(rows, false)
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(out); err != nil {
 		fatalf("encode report: %v", err)
 	}
+}
+
+func runNative(backend search.Backend, benchmark benchmarkCase, timeout time.Duration, summaryOnly bool) (runResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	start := time.Now()
+	page, err := backend.SearchPage(ctx, search.PageRequest{
+		Query: benchmark.Query, Categories: benchmark.Categories, Language: search.SearchLanguage(benchmark.Language),
+		UserID: 1, Scope: "benchmark", Limit: 24,
+	})
+	if err != nil {
+		return runResult{}, err
+	}
+	result := measure(page.Results, benchmark.Expected, time.Since(start), summaryOnly)
+	result.Degraded = page.Degraded
+	result.HasMore = page.NextOffset != ""
+	return result, nil
 }
 
 func groupOf(id string) string {
@@ -191,11 +259,13 @@ func runCandidate(aggregator *search.Aggregator, benchmark benchmarkCase, timeou
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	start := time.Now()
-	results, _ := aggregator.Search(ctx, benchmark.Query, benchmark.Categories, 0, search.SearchLanguage(benchmark.Language))
+	results, more, degraded := aggregator.SearchShared(ctx, benchmark.Query, benchmark.Categories, 0, search.SearchLanguage(benchmark.Language))
 	if err := ctx.Err(); err != nil {
 		return runResult{}, err
 	}
-	return measure(results, benchmark.Expected, time.Since(start), summaryOnly), nil
+	result := measure(results, benchmark.Expected, time.Since(start), summaryOnly)
+	result.HasMore, result.Degraded = more, degraded
+	return result, nil
 }
 
 func legacyRoundRobin(results []search.MediaResult, limit int) []search.MediaResult {
@@ -248,6 +318,7 @@ func measure(results []search.MediaResult, expected []string, elapsed time.Durat
 			if !summaryOnly {
 				result.Top = append(result.Top, topResult{
 					Rank: index + 1, Title: item.Title, Host: hostname, Engine: item.Engine, Pool: item.Pool,
+					Category: item.Category, MediaURL: item.MediaURL, ThumbURL: item.ThumbURL, PageURL: item.PageURL,
 				})
 			}
 		}
@@ -293,11 +364,15 @@ func summarize(rows []caseReport, legacy bool) summary {
 			value = row.Legacy
 		}
 		if value == nil {
+			out.Failed++
 			continue
 		}
 		out.Cases++
 		if value.Count == 0 {
 			out.Empty++
+		}
+		if value.Degraded {
+			out.Degraded++
 		}
 		out.AverageRelevantAt10 += float64(value.RelevantAt10)
 		out.AverageUniqueHostsAt10 += float64(value.UniqueHostsAt10)
@@ -316,7 +391,8 @@ func summarize(rows []caseReport, legacy bool) summary {
 		out.UsableHTTPSRatio = float64(usable) / float64(possible)
 	}
 	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-	out.P95Millis = durations[min(len(durations)-1, int(float64(len(durations))*0.95))]
+	out.P95Millis = durations[(len(durations)*95+99)/100-1]
+	out.MedianMillis = (float64(durations[(len(durations)-1)/2]) + float64(durations[len(durations)/2])) / 2
 	out.MaxMillis = durations[len(durations)-1]
 	return out
 }

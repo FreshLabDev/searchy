@@ -1,7 +1,7 @@
 // Command bot is the entrypoint for the media-search Telegram bot.
 //
-// It wires configuration, a tuned HTTP client (for SearXNG), the search
-// aggregator (cache + singleflight), and the Telegram handlers, then runs in
+// It wires configuration, a tuned HTTP client, the selected search backend,
+// and the Telegram handlers, then runs in
 // long-polling mode with graceful shutdown.
 package main
 
@@ -28,8 +28,6 @@ import (
 	"searchy/internal/db"
 	"searchy/internal/httpx"
 	"searchy/internal/i18n"
-	"searchy/internal/search"
-	"searchy/internal/search/searxng"
 	vidobridge "searchy/internal/vido"
 )
 
@@ -54,32 +52,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Shared, tuned HTTP client for SearXNG (NOT for Telegram long polling, whose
+	// Shared, tuned HTTP client for search (NOT for Telegram long polling, whose
 	// held-open connections would trip ResponseHeaderTimeout).
 	client := httpx.New()
 
-	provider := searxng.New(searxng.Options{
-		BaseURL:                cfg.SearxngURL,
-		HTTP:                   client,
-		Logger:                 logger,
-		EnginesImages:          cfg.EnginesImages,
-		EnginesVideos:          cfg.EnginesVideos,
-		EnginesImagesDiscovery: cfg.EnginesImagesDiscovery,
-		EnginesVideosDiscovery: cfg.EnginesVideosDiscovery,
-		SafeSearch:             cfg.SafeSearch,
-		ImageProxy:             cfg.ImageProxy,
-		Language:               cfg.Language,
-	})
-
-	agg := search.NewAggregator(provider, search.AggregatorOptions{
-		CacheSize:            cfg.CacheSize,
-		CacheTTL:             cfg.CacheTTL,
-		MaxResults:           cfg.MaxResults,
-		Timeout:              cfg.RequestTimeout,
-		DiscoveryPercent:     cfg.DiscoveryPercent,
-		DiscoveryWeakPercent: cfg.DiscoveryWeakPercent,
-		Logger:               logger,
-	})
+	backend, closeSearch := searchBackend(cfg, client, logger)
+	defer closeSearch()
 
 	// Postgres for search analytics. Best-effort: if it's unset or unreachable,
 	// the bot still runs (stats disabled).
@@ -135,7 +113,7 @@ func main() {
 	)
 
 	handlers := bothandlers.NewHandlers(bothandlers.Options{
-		Aggregator:      agg,
+		Backend:         backend,
 		Telegram:        api,
 		Logger:          logger,
 		HTTPClient:      client,
@@ -184,7 +162,7 @@ func main() {
 	go handlers.RunNotificationWorker(ctx)
 
 	// Health endpoint for container orchestration.
-	healthSrv := startHealthServer(logger, cfg.VidoBridgeEnabled, bridge)
+	healthSrv := startHealthServer(logger, cfg.VidoBridgeEnabled, bridge, cfg.SearchBackend, cfg.SearchFallback)
 	defer func() {
 		shutdownCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
 		defer c()
@@ -192,7 +170,8 @@ func main() {
 	}()
 
 	logger.Info("starting", "version", buildinfo.Version, "commit", buildinfo.Commit, "built", buildinfo.Date,
-		"searxng", cfg.SearxngURL, "workers", cfg.Workers, "cache_ttl", cfg.CacheTTL.String())
+		"search_backend", cfg.SearchBackend, "search_fallback", cfg.SearchFallback,
+		"workers", cfg.Workers, "cache_ttl", cfg.CacheTTL.String())
 	if err := handlers.Run(ctx); err != nil { // blocks until ctx is cancelled (SIGINT/SIGTERM)
 		logger.Error("polling stopped", "err", err)
 	}
@@ -292,10 +271,13 @@ func healthPort(addr string) string {
 	return strings.TrimPrefix(addr, ":")
 }
 
-func startHealthServer(logger *slog.Logger, bridgeEnabled bool, bridge *vidobridge.Bridge) *http.Server {
+func startHealthServer(logger *slog.Logger, bridgeEnabled bool, bridge *vidobridge.Bridge, backend, fallback string) *http.Server {
 	addr := os.Getenv("HEALTH_ADDR")
 	if addr == "" {
 		addr = ":8081"
+	}
+	if backend == "searxng" {
+		fallback = "none"
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, request *http.Request) {
@@ -311,11 +293,13 @@ func startHealthServer(logger *slog.Logger, bridgeEnabled bool, bridge *vidobrid
 			cancel()
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":          true,
-			"version":     buildinfo.Version,
-			"commit":      buildinfo.Commit,
-			"built":       buildinfo.Date,
-			"vido_bridge": bridgeStatus,
+			"ok":              true,
+			"version":         buildinfo.Version,
+			"commit":          buildinfo.Commit,
+			"built":           buildinfo.Date,
+			"vido_bridge":     bridgeStatus,
+			"search_backend":  backend,
+			"search_fallback": fallback,
 		})
 	})
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}

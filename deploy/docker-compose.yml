@@ -1,7 +1,14 @@
-# Media-search bot + self-hosted SearXNG.
+# Native Go media-search bot + private SearXNG fallback / rollback.
+#
+# Search settings come from ../.env. Defaults are SEARCH_BACKEND=native and
+# SEARCH_FALLBACK=searxng; no AI model or separate native search service is used.
+# Keep this dependency, config mount and network for fallback and switchback.
+# For native-only local use, set SEARCH_FALLBACK=none in ../.env, then run:
+# docker compose -f deploy/docker-compose.yml up -d --build --no-deps bot
+# Compose still requires SEARXNG_SECRET when resolving the complete manifest.
 #
 # SearXNG is NOT published to the host — it is reachable only on the internal
-# Docker network (the bot talks to http://searxng:8080). With the limiter
+# Docker network (fallback uses http://searxng:8080). With the limiter
 # disabled this is the simplest, reliable "private instance" posture. If you
 # ever expose SearXNG publicly, turn the limiter back on and add a Valkey/Redis
 # service (see SearXNG docs) — do not expose it limiter-off.

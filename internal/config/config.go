@@ -26,6 +26,11 @@ type Config struct {
 	Language               string // optional operator override; empty uses the user's language
 
 	// Search behaviour
+	SearchBackend        string // native or searxng
+	SearchFallback       string // searxng or none, for the native backend
+	NativeTimeout        time.Duration
+	NativeFirstPageWait  time.Duration
+	SearchMaxConcurrent  int
 	RequestTimeout       time.Duration // per backend call
 	MaxResults           int           // hard cap per inline answer (Telegram max 50)
 	DebounceDelay        time.Duration // inline debounce per user
@@ -77,6 +82,11 @@ func Load() (*Config, error) {
 		SafeSearch:             envInt("SAFE_SEARCH", 0),
 		ImageProxy:             envBool("IMAGE_PROXY", false),
 		Language:               strings.TrimSpace(os.Getenv("LANGUAGE")),
+		SearchBackend:          strings.ToLower(strings.TrimSpace(env("SEARCH_BACKEND", "native"))),
+		SearchFallback:         strings.ToLower(strings.TrimSpace(env("SEARCH_FALLBACK", "searxng"))),
+		NativeTimeout:          envDur("NATIVE_TIMEOUT", 3500*time.Millisecond),
+		NativeFirstPageWait:    envDur("NATIVE_FIRST_PAGE_WAIT", 800*time.Millisecond),
+		SearchMaxConcurrent:    envInt("SEARCH_MAX_CONCURRENT", 8),
 		// Covers the parallel primary pools plus one bounded English core fallback.
 		RequestTimeout:        envDur("REQUEST_TIMEOUT", 8*time.Second),
 		MaxResults:            envInt("MAX_RESULTS", 50),
@@ -98,6 +108,44 @@ func Load() (*Config, error) {
 
 	if c.BotToken == "" {
 		return nil, fmt.Errorf("BOT_TOKEN is required")
+	}
+	if c.SearchBackend != "native" && c.SearchBackend != "searxng" {
+		return nil, fmt.Errorf("SEARCH_BACKEND must be native or searxng")
+	}
+	if c.SearchFallback != "searxng" && c.SearchFallback != "none" {
+		return nil, fmt.Errorf("SEARCH_FALLBACK must be searxng or none")
+	}
+	for _, item := range []struct {
+		key   string
+		value time.Duration
+	}{
+		{"NATIVE_TIMEOUT", c.NativeTimeout},
+		{"NATIVE_FIRST_PAGE_WAIT", c.NativeFirstPageWait},
+		{"REQUEST_TIMEOUT", c.RequestTimeout},
+		{"CACHE_TTL", c.CacheTTL},
+	} {
+		if raw := os.Getenv(item.key); raw != "" {
+			if _, err := time.ParseDuration(raw); err != nil {
+				return nil, fmt.Errorf("%s must be a valid positive duration", item.key)
+			}
+		}
+		if item.value <= 0 {
+			return nil, fmt.Errorf("%s must be a positive duration", item.key)
+		}
+	}
+	if c.SearchBackend == "native" && (c.NativeFirstPageWait > c.NativeTimeout || c.NativeTimeout > c.RequestTimeout) {
+		return nil, fmt.Errorf("search budgets must satisfy NATIVE_FIRST_PAGE_WAIT <= NATIVE_TIMEOUT <= REQUEST_TIMEOUT")
+	}
+	if c.SearchMaxConcurrent < 1 || c.SearchMaxConcurrent > 128 {
+		return nil, fmt.Errorf("SEARCH_MAX_CONCURRENT must be between 1 and 128")
+	}
+	if raw := os.Getenv("SEARCH_MAX_CONCURRENT"); raw != "" {
+		if _, err := strconv.Atoi(raw); err != nil {
+			return nil, fmt.Errorf("SEARCH_MAX_CONCURRENT must be an integer")
+		}
+	}
+	if c.CacheSize < 1 || c.CacheSize > 16384 {
+		return nil, fmt.Errorf("CACHE_SIZE must be between 1 and 16384")
 	}
 	// A malformed base URL used to be caught while building each request; the
 	// shared client takes it as given, so it is checked once, here, where the

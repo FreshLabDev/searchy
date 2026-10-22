@@ -2,6 +2,10 @@ package search
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"math"
 	"net/url"
@@ -16,6 +20,8 @@ import (
 )
 
 const rrfK = 60.0
+
+var cacheSalt = []byte(rand.Text())
 
 // Provider is a media backend that can execute one bounded relevance-pool
 // request. The aggregator owns parallel pools, fallbacks, ranking and caching.
@@ -47,8 +53,9 @@ type Aggregator struct {
 }
 
 type cacheEntry struct {
-	results []MediaResult
-	hasMore bool
+	results  []MediaResult
+	hasMore  bool
+	degraded bool
 }
 
 func NewAggregator(p Provider, o AggregatorOptions) *Aggregator {
@@ -70,10 +77,18 @@ func NewAggregator(p Provider, o AggregatorOptions) *Aggregator {
 // Search returns ranked results without surfacing backend failures to Telegram.
 // Failed scheduled requests are not cached, so a subsequent search can retry.
 func (a *Aggregator) Search(ctx context.Context, query string, cats []Category, page int, language string) ([]MediaResult, bool) {
+	results, more, _ := a.SearchShared(ctx, query, cats, page, language)
+	return results, more
+}
+
+// SearchShared preserves the standalone SearXNG backend's singleflight. Its
+// upstream lease uses the aggregator timeout; bounded native fallback calls use
+// SearchBounded instead so they cannot outlive the remaining overall budget.
+func (a *Aggregator) SearchShared(ctx context.Context, query string, cats []Category, page int, language string) ([]MediaResult, bool, bool) {
 	language = SearchLanguage(language)
 	key := cacheKey(query, cats, page, language)
 	if e, ok := a.cache.Get(key); ok {
-		return e.results, e.hasMore
+		return e.results, e.hasMore, e.degraded
 	}
 
 	v, _, _ := a.sf.Do(key, func() (any, error) {
@@ -91,13 +106,30 @@ func (a *Aggregator) Search(ctx context.Context, query string, cats []Category, 
 	})
 
 	e, _ := v.(cacheEntry)
-	return e.results, e.hasMore
+	return e.results, e.hasMore, e.degraded
+}
+
+// SearchBounded is used by the backend adapter, where the request's remaining
+// deadline must also bound the upstream calls. Its caller owns coalescing.
+func (a *Aggregator) SearchBounded(ctx context.Context, query string, cats []Category, page int, language string) ([]MediaResult, bool, bool) {
+	ctx, cancel := context.WithTimeout(ctx, a.timeout)
+	defer cancel()
+	language = SearchLanguage(language)
+	key := cacheKey(query, cats, page, language)
+	if e, ok := a.cache.Get(key); ok {
+		return e.results, e.hasMore, e.degraded
+	}
+	e, cacheable := a.search(ctx, query, cats, page, language)
+	if cacheable && ctx.Err() == nil {
+		a.cache.Add(key, e)
+	}
+	return e.results, e.hasMore, e.degraded
 }
 
 func (a *Aggregator) search(ctx context.Context, query string, cats []Category, page int, language string) (cacheEntry, bool) {
 	core, coreErr, discovery, discoveryErr := a.primaryPools(ctx, query, cats, page, language)
 	if coreErr != nil && discoveryErr != nil {
-		return cacheEntry{}, false
+		return cacheEntry{degraded: true}, false
 	}
 
 	weak := make(map[Category]bool, len(cats))
@@ -137,10 +169,12 @@ func (a *Aggregator) search(ctx context.Context, query string, cats []Category, 
 		"weak", categoryNames(weakCats),
 	)
 
+	degraded := coreErr != nil || discoveryErr != nil || fallbackErr != nil || core.Degraded || discovery.Degraded
 	return cacheEntry{
-		results: results,
-		hasMore: core.HasMore || discovery.HasMore,
-	}, coreErr == nil && discoveryErr == nil && fallbackErr == nil
+		results:  results,
+		hasMore:  core.HasMore || discovery.HasMore,
+		degraded: degraded,
+	}, !degraded
 }
 
 func (a *Aggregator) primaryPools(ctx context.Context, query string, cats []Category, page int, language string) (SearchResponse, error, SearchResponse, error) {
@@ -618,7 +652,9 @@ func cacheKey(query string, cats []Category, page int, language string) string {
 	b.WriteString(itoa(page))
 	b.WriteByte('|')
 	b.WriteString(strings.ToLower(strings.TrimSpace(language)))
-	return b.String()
+	h := hmac.New(sha256.New, cacheSalt)
+	h.Write([]byte(b.String()))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func itoa(n int) string {
