@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 )
 
 // PageRequest is transient request input. Backends must not retain Query in
 // cached sessions or logs; use a process-local digest to identify a search.
+// An empty Query revokes this user/scope's interest in background search work
+// without starting retrieval. Backends with no background leases do nothing.
 type PageRequest struct {
 	Query      string
 	Categories []Category
@@ -71,6 +74,12 @@ func (b LegacyBackend) SearchPage(ctx context.Context, r PageRequest) (Page, err
 			return Page{}, ErrInvalidCursor
 		}
 		page = n
+	}
+	if err := ctx.Err(); err != nil {
+		return Page{}, err
+	}
+	if strings.TrimSpace(r.Query) == "" {
+		return Page{}, nil
 	}
 	if b.Aggregator == nil {
 		return Page{}, nil

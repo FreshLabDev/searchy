@@ -58,9 +58,21 @@ func (e *Engine) run(s *session, j *job, query, language string, cats []search.C
 		// Every provider receives an initial opportunity. Continuations are
 		// fetched only to fill a bounded lookahead, preserving their leftovers.
 		if j.native.Err() == nil && !s.limited {
+			initial := false
+			for _, state := range s.states {
+				if !state.done && !state.failed && state.calls == 0 {
+					initial = true
+					break
+				}
+			}
 			for i := range s.states {
 				state := &s.states[i]
 				if state.done || state.failed || state.pending || state.calls >= maxPages {
+					continue
+				}
+				// A fast provider's continuation must not take the last slot
+				// before another provider has made its first request.
+				if initial && state.calls > 0 {
 					continue
 				}
 				if state.calls > 0 && (len(s.pool) >= j.target || s.count+len(s.pool) >= s.budget) {

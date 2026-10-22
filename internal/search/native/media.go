@@ -92,6 +92,14 @@ func firstPhoto(values ...string) string {
 	return ""
 }
 
+func providerJPEGPreview(raw string) bool {
+	if photoURL(raw) == "" {
+		return false
+	}
+	u, _ := url.Parse(raw)
+	return strings.HasSuffix(strings.ToLower(u.Hostname()), ".mm.bing.net") && (u.Path == "/th" || u.Path == "/th/") && u.Query().Get("id") != ""
+}
+
 func resultID(category search.Category, raw string) string {
 	identity := canonicalURL(raw)
 	if category == search.CatVideo {
@@ -196,6 +204,9 @@ func mediaResult(category search.Category, engine, title, original, thumb, page 
 		// Telegram. Unknown or extreme dimensions use the provider's JPEG preview.
 		if originalPhoto != "" {
 			media = originalPhoto
+		} else {
+			// Source dimensions describe the original, not this separate preview.
+			width, height = 0, 0
 		}
 	} else {
 		return search.MediaResult{}, false

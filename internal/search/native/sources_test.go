@@ -238,7 +238,7 @@ func TestAllLocalesAndSafeSearchParameters(t *testing.T) {
 func TestWikimediaFixtureOrderingContinuationAndErrors(t *testing.T) {
 	body := `{"continue":{"gsroffset":17,"continue":"gsroffset||"},"query":{"pages":{"2":{"title":"File:Second.jpg","index":2,"imageinfo":[{"url":"https://upload.wikimedia.org/Second.jpg","thumburl":"https://upload.wikimedia.org/1280px-Second.jpg","descriptionurl":"https://commons.wikimedia.org/wiki/File:Second.jpg","mime":"image/jpeg","thumbmime":"image/jpeg","size":8000000,"width":4000,"height":3000}]},"1":{"title":"File:First.svg","index":1,"imageinfo":[{"url":"https://upload.wikimedia.org/First.svg","thumburl":"https://upload.wikimedia.org/1280px-First.svg.png","descriptionurl":"https://commons.wikimedia.org/wiki/File:First.svg","mime":"image/svg+xml","thumbmime":"image/png"}]}}}}`
 	page, err := parseWikimedia([]byte(body), "Wikimedia", 0)
-	if err != nil || len(page.Results) != 1 || page.NextCursor != "17" || page.Results[0].MediaURL != "https://upload.wikimedia.org/1280px-Second.jpg" {
+	if err != nil || len(page.Results) != 1 || page.NextCursor != "17" || page.Results[0].MediaURL != "https://upload.wikimedia.org/1280px-Second.jpg" || page.Results[0].Width != 0 || page.Results[0].Height != 0 {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 	for _, body := range []string{`{"error":{"code":"ratelimited","info":"secret-query"}}`, `<html>blocked</html>`, `{}`} {

@@ -25,6 +25,9 @@ func Rank(query string, candidates []search.MediaResult, limit int) []search.Med
 		key := canonicalURL(r.MediaURL)
 		if r.Category == search.CatVideo {
 			key = canonicalVideoURL(r.PageURL)
+			// Fallback providers use their own IDs. Normalize these too so a
+			// late variant can be recognized after an earlier page was frozen.
+			r.ID = resultID(r.Category, r.PageURL)
 		}
 		// Provider IDs can identify the same origin behind different JPEG previews.
 		if r.ID != "" {

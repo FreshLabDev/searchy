@@ -243,6 +243,23 @@ func (e *Engine) SearchPage(ctx context.Context, r search.PageRequest) (search.P
 		return search.Page{}, errors.New("search query too long")
 	}
 	if r.Query == "" {
+		owner := e.ownerKey(r.UserID, r.Scope)
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		// A superseded empty request must not revoke a newer owner's interest
+		// if its context was canceled while waiting for the engine lock.
+		if err := ctx.Err(); err != nil {
+			return search.Page{}, err
+		}
+		if e.closed {
+			return search.Page{}, context.Canceled
+		}
+		for sub := range e.owners[owner] {
+			sub.cancel()
+		}
+		if l := e.leases[owner]; l != nil {
+			e.dropLeaseLocked(l)
+		}
 		return search.Page{}, nil
 	}
 	r.Categories = categories(r.Categories)
@@ -364,7 +381,8 @@ func (e *Engine) SearchPage(ctx context.Context, r search.PageRequest) (search.P
 		}
 		complete := s.job == nil
 		ready := complete
-		if !r.WaitAll && s.job != nil && len(s.pool) >= min(3, r.Limit) && time.Since(s.job.start) >= e.options.FirstPageWait {
+		useful := len(s.pool) >= min(3, r.Limit) || !clearlyWeak(r.Query, s.pool)
+		if !r.WaitAll && s.job != nil && useful && time.Since(s.job.start) >= e.options.FirstPageWait {
 			ready = true
 		}
 		if ready {

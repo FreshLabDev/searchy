@@ -20,7 +20,7 @@ func TestImageOriginalGeometryRequiresIndependentJPEGPreview(t *testing.T) {
 				}
 			}
 			r, ok := mediaResult(search.CatImage, "test", "fixture", original, preview, "https://example.com/photo", 0, size.width, size.height)
-			if !ok || r.MediaURL != preview || r.ThumbURL != preview {
+			if !ok || r.MediaURL != preview || r.ThumbURL != preview || r.Width != 0 || r.Height != 0 {
 				t.Fatalf("independent provider JPEG preview rejected: %+v ok=%v", r, ok)
 			}
 		})
@@ -119,6 +119,20 @@ func TestYouTubeVideoConsensusAcrossBingAndDuckDuckGo(t *testing.T) {
 		ranked := Rank("fixture", []search.MediaResult{bingResults[0], ddg}, 24)
 		if len(ranked) != 1 || len(ranked[0].Engines) != 2 || ranked[0].PageURL != watch {
 			t.Fatalf("provider consensus lost for %q: %+v", page, ranked)
+		}
+	}
+}
+
+func TestRankNormalizesRawLegacyVideoIDsBeforeDeduplication(t *testing.T) {
+	const watch = "https://www.youtube.com/watch?v=abcdefghijk"
+	native, _ := mediaResult(search.CatVideo, "Bing videos", "fixture", "", "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg", watch, 0, 0, 0)
+	for _, page := range []string{watch + "&feature=share", "https://www.youtube.com/shorts/abcdefghijk", "https://youtu.be/abcdefghijk?si=token"} {
+		legacy := native
+		legacy.ID, legacy.PageURL = "raw-legacy-sha1-id", page
+		legacy.Engine, legacy.Engines = "youtube", []string{"youtube"}
+		ranked := Rank("fixture", []search.MediaResult{legacy, native}, 24)
+		if len(ranked) != 1 || ranked[0].ID != native.ID || len(ranked[0].Engines) != 2 || ranked[0].PageURL != page || legacy.ID != "raw-legacy-sha1-id" {
+			t.Fatalf("legacy ID bypassed native consensus or mutated delivery URL: %+v", ranked)
 		}
 	}
 }

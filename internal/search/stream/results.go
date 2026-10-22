@@ -20,7 +20,9 @@ func resultKeys(r search.MediaResult) [][32]byte {
 	}
 	if raw != "" {
 		if u, err := url.Parse(raw); err == nil {
-			u.Fragment = ""
+			if r.Category != search.CatVideo {
+				u.Fragment = ""
+			}
 			u.Host = strings.ToLower(u.Host)
 			raw = u.String()
 		}

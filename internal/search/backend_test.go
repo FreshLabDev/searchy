@@ -117,3 +117,14 @@ func TestStandaloneLegacyBackendCoalescesColdRequests(t *testing.T) {
 		t.Fatalf("eight identical requests made %d provider calls, want two pools", n)
 	}
 }
+
+func TestLegacyBackendEmptyQueryDoesNotStartRetrieval(t *testing.T) {
+	provider := &fakeProvider{fn: func(SearchRequest) (SearchResponse, error) {
+		return SearchResponse{}, errors.New("empty queries must not reach provider")
+	}}
+	backend := LegacyBackend{Aggregator: testAggregator(provider, 24), Shared: true}
+	page, err := backend.SearchPage(context.Background(), PageRequest{Query: " \t ", UserID: 1, Scope: "inline"})
+	if err != nil || len(page.Results) != 0 || len(provider.requests()) != 0 {
+		t.Fatal("empty query started retrieval")
+	}
+}

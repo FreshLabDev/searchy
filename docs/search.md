@@ -75,6 +75,10 @@ The production native pool holds at most 50 results. Inline pages contain up to
 `min(MAX_RESULTS, 24)` results; a smaller page limit does not truncate the whole
 pool. DM/group search obtains at most `MAX_RESULTS` results in one grid.
 
+With constrained concurrency, initial requests to every eligible source take
+priority over continuation requests. A useful single result can return after
+the collection window while slower sources continue filling later pages.
+
 Native `next_offset` is an opaque cursor within Telegram's 64-byte limit. It is
 bound to the user, a process-local HMAC query identity, language, categories and
 filters. Replaying it returns the same page. Invalid, mismatched or expired
@@ -115,6 +119,8 @@ process-local HMAC identifies a search. Cancelling one waiter must not cancel
 shared work needed by others. Late retrieval is short and bounded, and obsolete
 work with no consumers is cancelled. Global, per-user and per-source limits
 prevent slow upstreams from creating unlimited work.
+Clearing the inline query, including leaving only a prefix, revokes that
+owner's background-search lease without interrupting other users' shared work.
 
 ## Telegram media compatibility
 
@@ -126,6 +132,9 @@ as `InlineQueryResultPhoto.photo_url`. A JPEG original is used only when its
 advertised dimensions fit the photo constraints; otherwise a compatible preview
 is preferred. Video cards use their JPEG cover, retaining the watch-page URL
 for the Open button and the existing Vido download flow.
+The native SearXNG fallback uses the same media-normalization boundary. Known
+oversized originals require a compatible preview, and video identity is
+canonicalized across native and fallback sources before page deduplication.
 
 The laboratory HTML server in `searchy-lab` fetches, decodes, resizes and
 re-encodes thumbnails as JPEG through its local `/media/` endpoint. A browser can

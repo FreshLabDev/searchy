@@ -149,3 +149,41 @@ func TestNativeFactorySeparatesPageAndGridLimits(t *testing.T) {
 		t.Fatalf("grid exceeded its own limit: count=%d err=%v", len(page.Results), err)
 	}
 }
+
+func TestNativeFactoryNormalizesLegacyFallbackPhotos(t *testing.T) {
+	for key, value := range map[string]string{
+		"BOT_TOKEN": "test", "SEARCH_BACKEND": "native", "SEARCH_FALLBACK": "searxng",
+		"SEARXNG_URL":     "http://localhost:8080",
+		"REQUEST_TIMEOUT": "1s", "NATIVE_TIMEOUT": "200ms", "NATIVE_FIRST_PAGE_WAIT": "10ms",
+		"ENGINES_IMAGES": "flickr", "ENGINES_IMAGES_DISCOVERY": "flickr",
+	} {
+		t.Setenv(key, value)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: searchTransport(func(r *http.Request) (*http.Response, error) {
+		body := `{"batchcomplete":""}`
+		switch r.URL.Hostname() {
+		case "localhost":
+			body = `{"results":[{"template":"images.html","engine":"flickr","engines":["flickr"],"title":"red panda","url":"https://flickr.com/photos/panda","img_src":"https://live.staticflickr.com/panda.jpg","thumbnail_src":"https://live.staticflickr.com/preview.jpg","width":8000,"height":8000}]}`
+		case "www.bing.com":
+			body = `<div class="dgControl_list">no results</div>`
+		case "duckduckgo.com":
+			body = `vqd="123-456"`
+			if r.URL.Path == "/i.js" {
+				body = `{"results":[]}`
+			}
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	backend, closeBackend := searchBackend(cfg, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer closeBackend()
+	page, err := backend.SearchPage(context.Background(), search.PageRequest{
+		Query: "red panda", Categories: []search.Category{search.CatImage}, Language: "en", UserID: 1, Scope: "inline", Limit: 24,
+	})
+	if err != nil || len(page.Results) != 1 || page.Results[0].MediaURL != "https://live.staticflickr.com/preview.jpg" {
+		t.Fatalf("legacy fallback bypassed native normalization: %+v err=%v", page.Results, err)
+	}
+}

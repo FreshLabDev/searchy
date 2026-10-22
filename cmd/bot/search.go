@@ -32,7 +32,7 @@ func searchBackend(cfg *config.Config, client *http.Client, logger *slog.Logger)
 	}
 	engine := stream.New(stream.Options{
 		Sources: native.NewSources(native.Options{HTTP: client, SafeSearch: cfg.SafeSearch}),
-		Rank:    native.Rank, Fallback: legacy,
+		Rank:    native.Rank, Fallback: native.NewFallback(legacy),
 		FirstPageWait: cfg.NativeFirstPageWait, NativeTimeout: cfg.NativeTimeout,
 		Timeout: cfg.RequestTimeout, CacheTTL: cfg.CacheTTL, CacheSize: cfg.CacheSize,
 		// PageRequest.Limit caps each answer; keep a separate pool for scrolling.

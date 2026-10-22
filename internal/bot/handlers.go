@@ -157,6 +157,15 @@ func (h *Handlers) onInline(ctx context.Context, iq *tg.InlineQuery) {
 	}
 	cats, q := parseQuery(iq.Query)
 	if strings.TrimSpace(q) == "" {
+		if dctx.Err() != nil {
+			return
+		}
+		// Completed partial searches can keep an owner lease after their handler
+		// returns. An empty request revokes it without starting another search.
+		_, _ = h.backend.SearchPage(dctx, search.PageRequest{UserID: iq.From.ID, Scope: "inline"})
+		if dctx.Err() != nil {
+			return
+		}
 		h.answer(dctx, iq.ID, promptResult(lang, h.botUsername), "", 5)
 		return
 	}

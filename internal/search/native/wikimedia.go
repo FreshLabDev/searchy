@@ -130,7 +130,7 @@ func parseWikimedia(body []byte, engine string, offset int) (search.SourcePage, 
 		if thumb == "" && image.Size <= 5<<20 {
 			thumb = original
 		}
-		if photoURL(thumb) == "" && image.Size > 5<<20 {
+		if image.Size > 5<<20 && (photoURL(thumb) == "" || canonicalURL(thumb) == canonicalURL(image.URL)) {
 			continue
 		}
 		if original == "" && thumb == "" {
@@ -142,6 +142,7 @@ func parseWikimedia(body []byte, engine string, offset int) (search.SourcePage, 
 		}
 		if image.Size > 5<<20 && r.MediaURL == original {
 			r.MediaURL = r.ThumbURL
+			r.Width, r.Height = 0, 0
 		}
 		if validHTTPS(image.URL) {
 			r.ID = resultID(search.CatImage, image.URL)
