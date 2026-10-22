@@ -143,6 +143,7 @@ Searchy is pre-`v1.0.0`.
 ```text
 v0.1.0          public MVP release
 v0.2.0-alpha.N  relevance, discovery pools, dead-result and cover-card hardening
+v1.0.0-alpha.N  native metasearch and owner-directed production field testing
 v1.0.0          after real production history and a stable behavior contract
 ```
 
@@ -152,6 +153,11 @@ rule. From now on they are tagged on `dev`.
 Searchy has no test bot of its own, but the Vido bridge means a change here can
 fail inside Vido. A release touching delivery should be exercised against
 `vido-test` before it reaches the production pair.
+
+For `v1.0.0-alpha.1`, the owner explicitly requested field testing on the primary
+Searchy instance. This uses the production pre-release shortcut above: the tag
+stays on `dev`, the running version stays an alpha, and live delivery checks
+remain open until they have actually been exercised.
 
 ## Breaking-sensitive surface
 

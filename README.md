@@ -46,12 +46,12 @@ Searchy keeps the MVP deliberately narrow:
 
 | Channel | Version | Meaning |
 |:--|:--|:--|
-| Released | `v0.2.3` | Existing SearXNG-based release; see the changelog |
-| Development | `Unreleased` | Native backend by default, with SearXNG fallback and switchback |
+| Stable | `v0.2.3` | Existing SearXNG-based release; see the changelog |
+| Pre-release | `v1.0.0-alpha.1` | Native backend by default, with SearXNG fallback and switchback |
 
-This checkout documents the native engine work on `dev`. It is not a new
-published release or evidence of production latency. Native rollout still needs
-test-bot verification of inline paging, DM/group search and Vido delivery. See
+This alpha is intended for owner-directed testing on the primary Searchy
+instance. Inline paging, DM/group search and Vido delivery still need live
+verification. Engine benchmarks are not production Telegram latency. See
 [`docs/versioning.md`](docs/versioning.md) for the version line and
 [`CHANGELOG.md`](CHANGELOG.md) for release history.
 

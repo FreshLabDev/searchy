@@ -11,6 +11,15 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
+## v1.0.0-alpha.1 - 2026-10-23
+
+### Breaking
+
+- The default backend changes from private SearXNG to native Go metasearch.
+  Set `SEARCH_BACKEND=searxng` to retain the previous backend. In native mode,
+  `CACHE_SIZE` counts retained results, including frozen pages, rather than
+  legacy cache entries.
+
 ### Changed
 
 - Native Go metasearch is the default backend: direct Bing and DuckDuckGo
@@ -32,6 +41,16 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
   partial/degraded responses are not cached as complete healthy results.
 - Local Compose retains private SearXNG for fallback and rollback without public
   ports. Native-only startup can run just the bot. Search needs no new database.
+
+### Known Limitations
+
+- This alpha is intended for owner-directed testing on the primary Searchy
+  instance. Actual Telegram inline/media delivery and the full Vido delivery
+  matrix remain to be verified after rollout; CI and mocked integration tests
+  do not prove those live flows.
+- DuckDuckGo Images can return an HTTP 202 challenge. Other native sources can
+  still produce partial results; the optional private SearXNG fallback covers
+  weak or empty initial retrieval within the overall search budget.
 
 ## v0.2.3 - 2026-10-20
 
