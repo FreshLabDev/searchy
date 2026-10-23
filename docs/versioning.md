@@ -154,10 +154,10 @@ searchy has no test bot of its own, but the vido bridge means a change here can
 fail inside vido. A release touching delivery should be exercised against
 `vido-test` before it reaches the production pair.
 
-For `v1.0.0-alpha.1`, the owner explicitly requested field testing on the primary
-searchy instance. This uses the production pre-release shortcut above: the tag
-stays on `dev`, the running version stays an alpha, and live delivery checks
-remain open until they have actually been exercised.
+For `v1.0.0-alpha.1` and `v1.0.0-alpha.2`, the owner explicitly requested field
+testing on the primary searchy instance. This uses the production pre-release
+shortcut above: the tag stays on `dev`, the running version stays an alpha, and
+live delivery checks remain open until they have actually been exercised.
 
 ## Breaking-sensitive surface
 

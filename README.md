@@ -45,7 +45,7 @@ searchy queries image and video sources itself and answers right in the chat:
 | Channel | Version | Meaning |
 |:--|:--|:--|
 | Stable | `v0.2.3` | Existing SearXNG-based release; see the changelog |
-| Pre-release | `v1.0.0-alpha.1` | Native backend by default, with SearXNG fallback and switchback |
+| Pre-release | `v1.0.0-alpha.2` | Native backend by default, with SearXNG fallback and switchback |
 
 The alpha runs on the main searchy instance for testing. Inline paging, DM and
 group search and vido delivery have not yet been checked live in Telegram. See

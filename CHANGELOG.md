@@ -11,6 +11,23 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
+## v1.0.0-alpha.2 - 2026-10-23
+
+Fixes for what alpha.1 got wrong on the primary instance: DuckDuckGo videos
+were all dropped, inline scrolling stopped early, Telegram's cache was off for
+most image searches, and a search could expire while it was being scrolled.
+
+### Changed
+
+- `INLINE_CACHE_TIME` now defaults to `60` seconds instead of `300`, so a first
+  page that Telegram serves from its own cache cannot outlive the search session
+  behind its `next_offset`. **If `.env` sets `INLINE_CACHE_TIME` explicitly,
+  lower it to `60` or remove the line**, otherwise the next scroll after five
+  minutes can answer "search expired". This also applies to
+  `SEARCH_BACKEND=searxng`.
+- The bot writes its name in lowercase in the menu, the about panel and the
+  greeting in all 16 languages: "Hi! This is searchy".
+
 ### Fixed
 
 - DuckDuckGo Videos returns results again. Its covers come from Bing's
@@ -22,31 +39,38 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
   the challenge on every request, so in alpha.1 almost every search that
   included images was sent with `cache_time` 1. In a 36-query `searchbench`
   run, degraded first pages went from 15 to 6.
-- Inline scrolling now goes ten pages deep (240 results at the default page
-  size) instead of stopping after about 50. `MAX_RESULTS` still sets the page
-  size. `CACHE_SIZE` bounds all sessions together, so at the default `2048` about
-  eight searches scrolled to the end fit before the oldest idle ones are dropped.
-- `SEARCH_MAX_CONCURRENT` now sets the number of simultaneous upstream HTTP
-  requests. Values above 8 used to have no effect on them.
-- A first page sent while a slow source is still running is no longer treated as
-  degraded, so Telegram caches it as usual. Only a failed source sets
-  `cache_time` to 1.
-- A search session expires `CACHE_TTL` after the last cursor request instead of
-  after it was created, so scrolling near the end of the window no longer
-  returns "search expired". A new query still never gets a session older than
-  `CACHE_TTL`.
-
-### Changed
-
-- `INLINE_CACHE_TIME` now defaults to `60` seconds instead of `300`, so a first
-  page that Telegram serves from its own cache cannot outlive the search session
-  behind its `next_offset`.
+- Inline scrolling goes ten pages deep, 240 results at the default page size.
+  alpha.1 stopped after about 50. `MAX_RESULTS` still sets the page size.
+  `CACHE_SIZE` bounds all sessions together: at the default `2048`, about eight
+  searches scrolled to the end fit before the oldest idle ones are dropped.
+- A search session lives `CACHE_TTL` from the last scroll, not from the first
+  query, so scrolling near the end of the window no longer returns "search
+  expired". A new query never reuses a session older than `CACHE_TTL`.
+- A first page sent while a slower source is still running is no longer marked
+  degraded. Only a source that failed sets `cache_time` to 1.
+- `SEARCH_MAX_CONCURRENT` now also limits simultaneous requests to sources.
+  Values above 8 had no effect on them.
 
 ### Removed
 
 - The `f:` prefix. It did exactly what an ordinary query does, and the help
   text in every language presented it as a separate mode. `f: cats` is now
   searched as typed.
+
+### Known Limitations
+
+- DuckDuckGo Images answers every request with an HTTP 202 JavaScript
+  challenge, so image results come from Bing and Wikimedia only. The SearXNG
+  `duckduckgo images` engine returned almost nothing in the October 22
+  comparison runs as well. searchy does not try to solve the challenge.
+- Compared with the SearXNG backend, native search has no YouTube, Dailymotion
+  or Pinterest source. SearXNG fallback adds them only when native results are
+  weak.
+- Wikimedia Commons answers HTTP 429 to a fast burst of requests, such as a
+  `searchbench` run, and recovers within minutes.
+- Inline paging, DM and group search and the full vido delivery matrix have
+  still not been checked live in Telegram. CI and mocked tests do not cover
+  those flows.
 
 ## v1.0.0-alpha.1 - 2026-10-23
 
