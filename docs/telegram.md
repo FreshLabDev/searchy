@@ -26,8 +26,8 @@ enabled for the bot in BotFather (`/setinline`) or these updates never arrive.
 
 - Results are `InlineQueryResultPhoto` cards: images as their photo, and videos
   as a cover photo with an "Open on <platform>" link and a "Download" URL button
-  leading to an owner-bound Vido private-chat job. Telegram does not expose the
-  destination chat to Vido, so inline mode never attempts direct delivery into
+  leading to an owner-bound vido private-chat job. Telegram does not expose the
+  destination chat to vido, so inline mode never attempts direct delivery into
   the chosen chat.
 - Up to `MAX_RESULTS` (Telegram's hard cap of 50) results per answer, with a
   `next_offset` to load more as the user scrolls. Native uses an opaque cursor
@@ -49,24 +49,17 @@ enabled for the bot in BotFather (`/setinline`) or these updates never arrive.
 | `cats` | images and videos |
 | `i:cats` | images only |
 | `v:cats` | videos only |
-| `f:cats` | images and videos, same as `cats` |
-| `f: i:cats` or `i: f:cats` | images only |
-| `f: v:cats` or `v: f:cats` | videos only |
 
-`f:` is an alias for normal fast search with no AI; it does not reduce sources
-or change ranking. Prefixes are read only at the start, in either mode/category
-order, and work in inline search, DM text and `/search`. Ordinary query text is
-not rewritten. This release adds no `ai:` mode or AI toggle.
+Prefixes are read only at the start and work in inline search, DM text and
+`/search`. Ordinary query text is not rewritten.
 
 ### Media compatibility
 
-Inline images and video-cover cards use `InlineQueryResultPhoto`, so Telegram
-must be able to fetch a public HTTPS JPEG photo/cover, as well as a suitable
-thumbnail. A browser displaying a WebP, SVG, GIF or PNG is not sufficient proof.
-Native source normalization filters unsupported formats or selects a compatible
-provider preview; it does not publish the lab's local thumbnail-conversion
-endpoint. Validate the card by selecting and sending it in Telegram, not only
-by inspecting the HTML prototype or inline picker.
+Inline images and video covers are sent as `InlineQueryResultPhoto`, so Telegram
+has to fetch a public HTTPS JPEG and a thumbnail by itself. WebP, SVG, GIF and PNG
+open in a browser but are not accepted here. Native sources drop such formats or
+use the provider's JPEG preview. To check a card, pick it and send it in
+Telegram: the inline picker showing a thumbnail is not enough.
 
 ## DM and Group Search
 
@@ -87,10 +80,10 @@ image as a photo, a video as a cover card with the same Open/Download buttons.
 Grid buttons are **shared** — in a group, anyone can page or open an item, so
 there is no per-user ownership check on them.
 
-The user who selected a video owns its Searchy delivery callback and receives a
-new Searchy message in the same chat/topic. If another group member presses the
-same Download button, Core validates the exact card and Searchy opens a newly
-owner-bound Vido deep link for that person. Nothing extra is posted in the
+The user who selected a video owns its searchy delivery callback and receives a
+new searchy message in the same chat/topic. If another group member presses the
+same Download button, Core validates the exact card and searchy opens a newly
+owner-bound vido deep link for that person. Nothing extra is posted in the
 group.
 
 ## The Menu

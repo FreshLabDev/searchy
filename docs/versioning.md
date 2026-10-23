@@ -3,7 +3,7 @@
 Every Asterfield repository versions and releases the same way. This document is
 identical in all of them; only the last two sections — this repository's own
 line, and the surface where a change here breaks something — are specific to
-Searchy.
+searchy.
 
 ## The number
 
@@ -108,7 +108,7 @@ committed to `main` directly, ever.
 
 A pre-release should run somewhere before it is promoted, and that somewhere is a
 second bot: its own token from BotFather, its own stack on the host, its own
-`.env`, its own row in the shared `core` database. Vido has a standing one —
+`.env`, its own row in the shared `core` database. vido has a standing one —
 `vido-test`, running the `dev` image alongside production.
 
 Not every repository needs one permanently. When a change is big enough that
@@ -136,9 +136,9 @@ ever be true of either.
   numbers say, so it is visible to somebody skimming.
 
 
-## Searchy today
+## searchy today
 
-Searchy is pre-`v1.0.0`.
+searchy is pre-`v1.0.0`.
 
 ```text
 v0.1.0          public MVP release
@@ -150,12 +150,12 @@ v1.0.0          after real production history and a stable behavior contract
 Pre-releases up to `v0.2.0-alpha.4` were tagged on `main`, under the earlier
 rule. From now on they are tagged on `dev`.
 
-Searchy has no test bot of its own, but the Vido bridge means a change here can
-fail inside Vido. A release touching delivery should be exercised against
+searchy has no test bot of its own, but the vido bridge means a change here can
+fail inside vido. A release touching delivery should be exercised against
 `vido-test` before it reaches the production pair.
 
 For `v1.0.0-alpha.1`, the owner explicitly requested field testing on the primary
-Searchy instance. This uses the production pre-release shortcut above: the tag
+searchy instance. This uses the production pre-release shortcut above: the tag
 stays on `dev`, the running version stays an alpha, and live delivery checks
 remain open until they have actually been exercised.
 
@@ -168,5 +168,5 @@ A change is breaking — and needs a `Breaking` changelog entry — when it affe
 - SearXNG query, engine, or JSON-API assumptions
 - shared `core` behavior (functions, role, `search_path`) and saved-language
   resolution
-- the Vido bridge contract: intents, delivery plans, and ACK semantics
+- the vido bridge contract: intents, delivery plans, and ACK semantics
 - Docker Compose or deployment assumptions

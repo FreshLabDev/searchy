@@ -1,6 +1,6 @@
 # Architecture
 
-Searchy is one Go service with three runtime surfaces:
+searchy is one Go service with three runtime surfaces:
 
 - Telegram long polling for user interaction (inline, DM, and group search).
 - Native HTTP adapters for Bing and DuckDuckGo images/videos, plus Wikimedia
@@ -9,11 +9,11 @@ Searchy is one Go service with three runtime surfaces:
 
 Search has no durable state: results and pagination sessions live only in
 bounded, expiring RAM caches, and raw query text is never retained in sessions,
-logs or databases. The bot needs no AI model, Python search service, or new
-database. Two existing logical Postgres connections are optional. Production points
-both at one shared `core-postgres` instance: the analytics connection is
-restricted to schema `searchy`, while the core connection exposes only the
-shared functions and bridge API granted to `searchy_core`.
+logs or databases. Search needs no new database. Two existing logical Postgres
+connections are optional. Production points both at one shared `core-postgres`
+instance: the analytics connection is restricted to schema `searchy`, while the
+core connection exposes only the shared functions and bridge API granted to
+`searchy_core`.
 
 ## Packages
 
@@ -37,7 +37,7 @@ shared functions and bridge API granted to `searchy_core`.
 - `internal/bot`: the Telegram layer — the update router, inline handler,
   DM/group grid handler, the `/start` menu, per-user debounce, rendering, and
   analytics/language helpers.
-- `internal/db`: Searchy's logical Postgres schema for private search analytics
+- `internal/db`: searchy's logical Postgres schema for private search analytics
   (searches and selections) — no query text, no users table. Production hosts
   it inside the shared physical `core-postgres` instance.
 - `internal/core`: a nil-safe client for the shared cross-bot **core** Postgres
@@ -77,7 +77,7 @@ The default budgets are `NATIVE_FIRST_PAGE_WAIT=800ms`, `NATIVE_TIMEOUT=3.5s`,
 and `REQUEST_TIMEOUT=8s` including fallback, with `SEARCH_MAX_CONCURRENT=8`.
 The first-page engine target of roughly 0.5 to 1 second with healthy sources is
 not measured production latency and does not include Telegram's media fetch or
-all handler/Vido-link work. See [Search integration](search.md) for failure,
+all handler/vido-link work. See [Search integration](search.md) for failure,
 cache and media constraints.
 
 ### DM / group search
@@ -99,7 +99,7 @@ cache and media constraints.
 
 ## The Two-Database Model
 
-Searchy separates its **own private analytics** from the **shared identity hub**:
+searchy separates its **own private analytics** from the **shared identity hub**:
 
 - **Analytics DB (`DATABASE_URL`)** — searchy's own tables (`searches`,
   `selections`). Counts and timings only, keyed on the raw Telegram user id with
@@ -107,7 +107,7 @@ Searchy separates its **own private analytics** from the **shared identity hub**
   idempotent (it also drops any legacy `users` table). Empty disables `/stats`.
 - **Core DB (`CORE_DATABASE_URL`)** — the shared cross-bot **core** Postgres, one
   instance for searchy, vido, quoto, and branchy, keyed on the global Telegram
-  id. It owns identity, presence, and the user's saved language. Searchy connects
+  id. It owns identity, presence, and the user's saved language. searchy connects
   with a least-privilege role (`searchy_core`) and only ever calls core's
   SECURITY DEFINER functions; it does not touch core tables directly. Empty
   disables core integration and language falls back to the Telegram hint.
@@ -156,44 +156,44 @@ not create a database, and native search does not add one.
 - Stats are served from a short-lived snapshot cache and refreshed in the
   background, so toggling the personal/global tabs costs no extra queries.
 
-## Vido bridge
+## vido bridge
 
 Video cards in DM/group search receive an owner-bound `vd:` callback. Migration
 004 creates the bridge and hashed intents, migration 005 makes send/ACK and
 terminal notifications durable, and migration 006 adds the non-selector group
-handoff. Searchy binds the intent to the sent card and asks Vido's standalone
-worker to process the source with the user's personal Vido settings. Searchy
+handoff. searchy binds the intent to the sent card and asks vido's standalone
+worker to process the source with the user's personal vido settings. searchy
 receives no source URL or settings back: it claims a versioned DeliveryPlan,
 validates its operation/path whitelist, and sends a new message in the original
 chat/topic with its own token.
 
 Migration 006 makes a bound group card shareable without making its token
-publicly consumable. The selector still receives Searchy delivery in the group;
-another user receives a new personal Vido DM intent through
+publicly consumable. The selector still receives searchy delivery in the group;
+another user receives a new personal vido DM intent through
 `answerCallbackQuery.url`. Core validates the exact card chat/message and binds
-the derived token to that user. Searchy never receives the copied source URL,
+the derived token to that user. searchy never receives the copied source URL,
 and no handoff message is posted in the group.
 
-Inline cards stay cover-only and personal. Their Download button is a Vido
+Inline cards stay cover-only and personal. Their Download button is a vido
 `/start ia_...` deep link because Telegram does not expose the chosen chat id to
-Vido. The Vido flow uses chat actions without a visible starting message.
+vido. The vido flow uses chat actions without a visible starting message.
 
-Vido alone writes the temporary shared cache. Searchy and the independent local
-Bot API mount it read-only at `/shared-media-cache`; Searchy passes local file
+vido alone writes the temporary shared cache. searchy and the independent local
+Bot API mount it read-only at `/shared-media-cache`; searchy passes local file
 URIs to the Bot API and ACKs each media/album/sidecar operation. The last lease
-release lets Vido delete the physical files, while bot-specific Telegram
+release lets vido delete the physical files, while bot-specific Telegram
 `file_id` records remain durable.
 
-Before a Telegram call, Searchy records the operation as `sending`. A confirmed
+Before a Telegram call, searchy records the operation as `sending`. A confirmed
 ACK is monotonic and cannot later be replaced by a timeout or failure. If the
 process dies after Telegram may have accepted the media, lease recovery marks
 the delivery unknown and offers only the card owner an explicit retry warning
 about a possible duplicate. Failed downloads are delivered through a durable
-notification outbox using Vido's structured `user_message_key`, so a Searchy
-restart does not lose the specific error. Searchy retries both the operation ACK
+notification outbox using vido's structured `user_message_key`, so a searchy
+restart does not lose the specific error. searchy retries both the operation ACK
 and the final bridge commit on short Core failures without resending Telegram
 media.
 
 The bridge pool is initialized without requiring core-postgres to be reachable
 at that exact startup instant. pgx reconnects lazily; health stays `degraded`
-while core is down and returns to `ok` without restarting Searchy.
+while core is down and returns to `ok` without restarting searchy.

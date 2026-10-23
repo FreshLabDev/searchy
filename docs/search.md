@@ -1,9 +1,9 @@
 # Search Integration
 
-Searchy defaults to native Go metasearch over external indexes. The existing
+searchy defaults to native Go metasearch over external indexes. The existing
 SearXNG aggregator is retained behind the same `search.Backend` contract for
-optional fallback and explicit switchback. There is no AI model, Python search
-service, or new database in this implementation.
+optional fallback and explicit switchback. Search needs no separate service or
+database.
 
 ## Backend selection and startup
 
@@ -46,15 +46,13 @@ These local startup commands are not production deployment instructions.
 - `ENGINES_*`, `DISCOVERY_PERCENT`, `DISCOVERY_WEAK_PERCENT` and `IMAGE_PROXY`
   are SearXNG-only settings. Native uses its own source set and ranking.
 
-`f:` is an explicit alias for normal fast search with no AI and the same sources
-and ranking. Leading `i:`/`v:` category prefixes can appear before or after it.
-For example, `f: v: red panda` and `v: f: red panda` equal `v: red panda`.
-Plain `red panda` searches both categories. Prefixes also work in `/search`;
-text inside the query is not rewritten. There is no `ai:` mode or AI toggle.
+Leading `i:`/`v:` prefixes narrow the categories; the last one wins. Plain
+`red panda` searches both. Prefixes also work in `/search`; text inside the
+query is not rewritten.
 
 Direct adapters depend on source HTML/JSON structure, token acquisition and
 upstream access policy. Markup changes, throttling and challenges can reduce or
-break a source even when Searchy is healthy. Use saved public response fixtures
+break a source even when searchy is healthy. Use saved public response fixtures
 to check parsers, and query-free source errors, timing and usable-result counts
 to diagnose failures. Do not log request URLs, tokens or upstream bodies that
 can contain query text.
@@ -71,9 +69,13 @@ and can be ranked there, but cannot reorder or repeat cards already returned.
 Scrolling consumes that pool and, when needed, asks sources for continuation.
 Source exhaustion is distinct from a transient failure.
 
-The production native pool holds at most 50 results. Inline pages contain up to
-`min(MAX_RESULTS, 24)` results; a smaller page limit does not truncate the whole
-pool. DM/group search obtains at most `MAX_RESULTS` results in one grid.
+Inline pages contain up to `min(MAX_RESULTS, 24)` results, and one search can be
+scrolled through ten pages: 240 results by default. The pool is also bounded by
+`CACHE_SIZE`, which counts results of all sessions together. When it is full,
+the least recently used idle sessions are dropped, so a deep scroller can push
+out others. At the default `2048`, about eight sessions scrolled to the end fit;
+a session scrolled only a few pages takes much less. DM/group search obtains at
+most `MAX_RESULTS` results in one grid.
 
 With constrained concurrency, initial requests to every eligible source take
 priority over continuation requests. A useful single result can return after
@@ -83,13 +85,14 @@ Native `next_offset` is an opaque cursor within Telegram's 64-byte limit. It is
 bound to the user, a process-local HMAC query identity, language, categories and
 filters. Replaying it returns the same page. Invalid, mismatched or expired
 cursors must not silently open a different search. Sessions are temporary and
-expire on TTL, eviction or restart; a fresh query starts over.
+expire `CACHE_TTL` after the last cursor request, on eviction or on restart. A
+fresh query never reuses a session older than `CACHE_TTL`; it starts over.
 
 Telegram receives one `answerInlineQuery` per inline request and asks for later
 pages using `next_offset`. This is incremental retrieval inside the engine,
 not an ability to push additions into an already-answered picker. DM/group
 search obtains a bounded complete result pool for the existing numbered grid;
-its paging, selection and Vido behavior stay the same.
+its paging, selection and vido behavior stay the same.
 
 ## Budgets, cache and degradation
 
@@ -98,19 +101,22 @@ its paging, selection and Vido behavior stay the same.
 | `NATIVE_FIRST_PAGE_WAIT` | `800ms` | Initial inline collection window; enough results may return earlier |
 | `NATIVE_TIMEOUT` | `3.5s` | Native source work budget |
 | `REQUEST_TIMEOUT` | `8s` | Overall search budget including any fallback |
-| `SEARCH_MAX_CONCURRENT` | `8` | Concurrent native search limit |
-| `CACHE_TTL` | `5m` | Default in-memory result/session lifetime |
+| `SEARCH_MAX_CONCURRENT` | `8` | Concurrent native searches and simultaneous upstream HTTP requests |
+| `CACHE_TTL` | `5m` | In-memory result lifetime; a native session lives this long after its last cursor request |
 | `CACHE_SIZE` | `2048` | Native retained-result budget including frozen pages; legacy cache entries |
 
 A first engine page around 0.5 to 1 second with healthy sources is a test target,
 not a measured production result or a guarantee of Telegram display time. Handler
-work, Vido-link preparation and Telegram's own media fetch add separate costs.
+work, vido-link preparation and Telegram's own media fetch add separate costs.
 
 Fallback is optional and bounded by the remaining overall deadline. It is not
 queried during healthy native search and cannot change an already-returned page.
 A source failure may still leave useful partial results. Keep partial/degraded
-status explicit; do not put failed or degraded output into the five-minute cache
-as a healthy complete response. A frozen session page can still be replayed
+status explicit; do not put failed or degraded output into the Telegram cache
+as a healthy complete response. A page sent while slow sources are still
+running is not degraded: it is complete as returned, and their results go to
+later pages. Only a failed source marks the page degraded and sets `cache_time`
+to 1. A frozen session page can still be replayed
 without claiming all sources succeeded.
 
 Result/session caches are bounded in RAM by size and time. Raw query text is
@@ -131,7 +137,7 @@ Known unsupported photo formats such as SVG, GIF, WebP, AVIF and PNG are not sen
 as `InlineQueryResultPhoto.photo_url`. A JPEG original is used only when its
 advertised dimensions fit the photo constraints; otherwise a compatible preview
 is preferred. Video cards use their JPEG cover, retaining the watch-page URL
-for the Open button and the existing Vido download flow.
+for the Open button and the existing vido download flow.
 The native SearXNG fallback uses the same media-normalization boundary. Known
 oversized originals require a compatible preview, and video identity is
 canonicalized across native and fallback sources before page deduplication.
@@ -140,7 +146,7 @@ The laboratory HTML server in `searchy-lab` fetches, decodes, resizes and
 re-encodes thumbnails as JPEG through its local `/media/` endpoint. A browser can
 also display formats that Telegram's inline-photo API does not accept. Neither
 a working HTML preview nor a `.jpg` suffix proves Telegram can fetch and send
-the actual bytes. Production does not copy the lab media proxy or AI service:
+the actual bytes. Production does not copy the lab media proxy:
 Telegram fetches the selected public photo/cover URL directly. Check real card
 selection and delivery in Telegram before release.
 
@@ -172,13 +178,13 @@ search:
   formats: [html, json]
 ```
 
-Do not expose this limiter-free instance or point Searchy at a public instance.
+Do not expose this limiter-free instance or point searchy at a public instance.
 Telegram fetches media itself, so `IMAGE_PROXY` stays off while SearXNG is
 internal-only.
 
 ### Requests and pools
 
-Searchy sends form-encoded `POST /search` with `q`, `format=json`, `engines`,
+searchy sends form-encoded `POST /search` with `q`, `format=json`, `engines`,
 `pageno`, `safesearch` and `language`. Query text therefore does not appear in
 access URLs. `categories` is never sent because it would fan out to every engine
 in the category.
@@ -195,10 +201,10 @@ Core lists use `ENGINES_IMAGES` and `ENGINES_VIDEOS`; discovery lists use
 are rejected before contacting SearXNG.
 
 The saved user language is passed per request and is part of the cache key.
-Chinese maps to SearXNG's search locale `zh-CN`; the other supported Searchy
+Chinese maps to SearXNG's search locale `zh-CN`; the other supported searchy
 codes map directly.
 An explicit `LANGUAGE` environment value overrides all users. When a non-English
-core response is weak, Searchy adds one English core request. It does not run a
+core response is weak, searchy adds one English core request. It does not run a
 second discovery request.
 
 ### Legacy normalization
@@ -264,7 +270,7 @@ go run ./cmd/searchbench \
 
 `native` and `compare-native` measure the first engine page, capped at 24 results,
 with cold retrieval state per distinct case and no native-to-SearXNG fallback.
-They exclude debounce, Telegram handler work, Vido-link preparation and client
+They exclude debounce, Telegram handler work, vido-link preparation and client
 thumbnail loading. `-mode compare` still compares the historical `v0.1.0`
 SearXNG interleave with the current SearXNG aggregator, without native retrieval.
 
@@ -274,4 +280,4 @@ count, failed/degraded counts, median, p95 and maximum latency. Keyword relevanc
 not an assessment of actual visual relevance. Native case reports also expose
 degraded status and whether a later page is available. Run without
 `-summary-only` to inspect top-ten titles and media/source URLs; actual Telegram paging, image delivery
-and the DM/group/topic/Vido matrix still need test-bot verification before release.
+and the DM/group/topic/vido matrix still need test-bot verification before release.

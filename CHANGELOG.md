@@ -1,6 +1,6 @@
 # Changelog
 
-All notable Searchy changes are documented here.
+All notable searchy changes are documented here.
 
 The `## <tag>` section of this file *is* the GitHub Release body: the release
 workflow copies it verbatim and refuses a tag that has no section. Write it
@@ -10,6 +10,43 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 [`docs/releases.md`](docs/releases.md) for how a release is published.
 
 ## Unreleased
+
+### Fixed
+
+- DuckDuckGo Videos returns results again. Its covers come from Bing's
+  thumbnail service as `/th/id/…` links, which the JPEG check accepted only in
+  the `/th?id=…` form, so every DuckDuckGo video was dropped and video search
+  relied on Bing alone. Both now return about 50 videos per query.
+- When DuckDuckGo answers with a 202 challenge, that category is skipped for
+  ten minutes and no longer marks the page degraded. DuckDuckGo Images gets
+  the challenge on every request, so in alpha.1 almost every search that
+  included images was sent with `cache_time` 1. In a 36-query `searchbench`
+  run, degraded first pages went from 15 to 6.
+- Inline scrolling now goes ten pages deep (240 results at the default page
+  size) instead of stopping after about 50. `MAX_RESULTS` still sets the page
+  size. `CACHE_SIZE` bounds all sessions together, so at the default `2048` about
+  eight searches scrolled to the end fit before the oldest idle ones are dropped.
+- `SEARCH_MAX_CONCURRENT` now sets the number of simultaneous upstream HTTP
+  requests. Values above 8 used to have no effect on them.
+- A first page sent while a slow source is still running is no longer treated as
+  degraded, so Telegram caches it as usual. Only a failed source sets
+  `cache_time` to 1.
+- A search session expires `CACHE_TTL` after the last cursor request instead of
+  after it was created, so scrolling near the end of the window no longer
+  returns "search expired". A new query still never gets a session older than
+  `CACHE_TTL`.
+
+### Changed
+
+- `INLINE_CACHE_TIME` now defaults to `60` seconds instead of `300`, so a first
+  page that Telegram serves from its own cache cannot outlive the search session
+  behind its `next_offset`.
+
+### Removed
+
+- The `f:` prefix. It did exactly what an ordinary query does, and the help
+  text in every language presented it as a separate mode. `f: cats` is now
+  searched as typed.
 
 ## v1.0.0-alpha.1 - 2026-10-23
 

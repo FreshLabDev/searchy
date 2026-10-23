@@ -1,7 +1,7 @@
 # Native Go media-search bot + private SearXNG fallback / rollback.
 #
 # Search settings come from ../.env. Defaults are SEARCH_BACKEND=native and
-# SEARCH_FALLBACK=searxng; no AI model or separate native search service is used.
+# SEARCH_FALLBACK=searxng.
 # Keep this dependency, config mount and network for fallback and switchback.
 # For native-only local use, set SEARCH_FALLBACK=none in ../.env, then run:
 # docker compose -f deploy/docker-compose.yml up -d --build --no-deps bot

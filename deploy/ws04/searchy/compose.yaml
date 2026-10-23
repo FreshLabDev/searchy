@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Searchy production stack on WS04. Identity, language and analytics use the
+# searchy production stack on WS04. Identity, language and analytics use the
 # shared core-postgres through least-privilege URLs from .env.
 #
 # The image is pulled, never built here. A stack that builds from a working

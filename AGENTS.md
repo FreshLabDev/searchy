@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is for coding agents working on Searchy. Keep the project minimal,
+This file is for coding agents working on searchy. Keep the project minimal,
 private by design, and production-minded.
 
 - All Telegram traffic goes through `github.com/FreshLabDev/tg` — startup
@@ -11,10 +11,10 @@ private by design, and production-minded.
 
 ## Project Shape
 
-- Searchy is one Go service (module `searchy`).
+- searchy is one Go service (module `searchy`).
 - Its default backend is native Go metasearch: direct Bing and DuckDuckGo
-  image/video adapters, plus Wikimedia images. No AI model, Python search
-  service, or separate search index is required.
+  image/video adapters, plus Wikimedia images. No separate search service or
+  index is required.
 - `SEARCH_BACKEND=searxng` selects the existing private SearXNG JSON backend for
   rollback. With native selected, `SEARCH_FALLBACK=searxng` allows bounded
   fallback on weak or empty results; `none` disables it.
@@ -30,19 +30,17 @@ private by design, and production-minded.
 ## Hard Product Boundaries
 
 - Two media categories only: **images** and **videos** (`i:` / `v:` prefixes).
-- `f:` aliases normal fast search, with the same sources and ranking and no AI.
-  Leading mode/category prefixes can be combined in either order (`f: v:` or
-  `v: f:`); do not rewrite prefix-like text inside the query. Plain queries use
-  the same mode. Do not add an `ai:` mode as part of this backend migration.
+- Only the leading prefix chain is syntax; the last `i:`/`v:` wins. Do not
+  rewrite prefix-like text inside the query.
 - Inline search is the primary surface; DM and group search use a numbered grid.
 - The `/start` menu is inline and callback-driven (language, stats, help, about).
 - In groups, searching is explicit via `/search`; plain messages are ignored.
 - Do not add audio/music search, webhook mode, or search/delivery surfaces
   beyond these unless explicitly requested.
 - `internal/vido` is a production least-privilege bridge, not a downloader:
-  Searchy creates owner-bound intents and executes validated `DeliveryPlan v1`
-  operations, while Vido owns URLs, settings, extraction, shared-cache writes,
-  error classification, and Vido-DM delivery. `WEBHOOK_SECRET` remains an
+  searchy creates owner-bound intents and executes validated `DeliveryPlan v1`
+  operations, while vido owns URLs, settings, extraction, shared-cache writes,
+  error classification, and vido-DM delivery. `WEBHOOK_SECRET` remains an
   unwired placeholder.
 
 ## Privacy Invariants
@@ -59,7 +57,7 @@ private by design, and production-minded.
 - **Do not recreate a local `users` table.** Identity, presence, and the user's
   saved language live in the shared **core** Postgres, keyed on the global
   Telegram id. The startup schema drops any legacy `users` table on purpose.
-- Searchy identifies itself to core as `searchy` and connects with a
+- searchy identifies itself to core as `searchy` and connects with a
   least-privilege role (`searchy_core`).
 - Write to core **only** through its SECURITY DEFINER functions (`core.touch`,
   `core.set_language`, `core.clear_language`); read language through
@@ -91,7 +89,7 @@ private by design, and production-minded.
   formats at the source boundary and use a provider's compatible preview when
   needed; inline photo URLs and video covers must be Telegram-compatible JPEGs.
 - Any server-side media fetching must reject private addresses and unsafe
-  redirects and enforce response size limits. Keep the Vido cache/path rules.
+  redirects and enforce response size limits. Keep the vido cache/path rules.
 
 ### SearXNG fallback and switchback
 
@@ -175,8 +173,7 @@ docker compose -f deploy/docker-compose.yml config
 - Inline search returns image and video cards and pages with `next_offset`.
 - DM plain-text search and group `/search` both return a numbered grid; paging
   and per-item pick work.
-- Category prefixes (`i:` / `v:`) narrow correctly, with `f:` combinations in
-  either order matching normal search.
+- Category prefixes (`i:` / `v:`) narrow correctly.
 - Native pages replay unchanged, late results do not reorder returned cards,
   and expired cursors, source failures, cancellation, and concurrency limits
   are tested. Partial/degraded results are not cached as healthy complete pages.
@@ -189,14 +186,14 @@ docker compose -f deploy/docker-compose.yml config
   bot runs cleanly with both databases unset.
 - No query text appears in analytics or logs.
 - `/healthz` reports the build version, commit, and date.
-- The Searchy × Vido matrix passes for DM, group selector, another group member,
+- The searchy × vido matrix passes for DM, group selector, another group member,
   topic, inline deep link, audio, terminal errors, and cached `file_id` reuse.
 - A fresh production bridge smoke produces a delivered `target_bot=searchy`
   job; search-only activity is not sufficient evidence for an RC or stable tag.
 
 ## License
 
-Searchy is licensed under Apache-2.0. Preserve the root `LICENSE` and `NOTICE`
+searchy is licensed under Apache-2.0. Preserve the root `LICENSE` and `NOTICE`
 files and keep public documentation consistent with that license.
 
 ## Deploying

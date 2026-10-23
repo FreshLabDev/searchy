@@ -19,7 +19,7 @@ server:
   limiter: false
   public_instance: false
   image_proxy: false
-  # Searchy uses form-encoded POST so query text never appears in access URLs.
+  # searchy uses form-encoded POST so query text never appears in access URLs.
   method: "POST"
 
 search:
@@ -30,7 +30,7 @@ search:
   autocomplete: ""
 
 outgoing:
-  # Direct egress with a tight per-engine budget. Searchy supplies the user's
+  # Direct egress with a tight per-engine budget. searchy supplies the user's
   # locale and adds one English core fallback only for weak localized results.
   request_timeout: 2.0
   max_request_timeout: 3.0
@@ -39,7 +39,7 @@ outgoing:
   enable_http2: false
 
 # Keep known-blocked adapters disabled. Explicit core/discovery pools are sent
-# by Searchy, so no broad category fan-out is used.
+# by searchy, so no broad category fan-out is used.
 engines:
   - name: brave.images
     disabled: true
