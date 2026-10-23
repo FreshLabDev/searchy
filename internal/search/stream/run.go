@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -185,6 +186,10 @@ func (e *Engine) callFallback(s *session, j *job, query, language string, cats [
 }
 
 func (e *Engine) acceptLocked(s *session, state *continuation, query, cursor, next string, results []search.MediaResult, degraded bool, err error, category search.Category) {
+	if errors.Is(err, search.ErrSourcePaused) {
+		state.done = true
+		return
+	}
 	if err != nil {
 		state.failed = true
 		if state.calls >= maxPages {
@@ -243,6 +248,9 @@ func (e *Engine) diagnose(name string, start time.Time, count int, degraded bool
 	}
 	if err != nil {
 		status = "error"
+	}
+	if errors.Is(err, search.ErrSourcePaused) {
+		status = "paused"
 	}
 	if canceled {
 		status = "canceled"

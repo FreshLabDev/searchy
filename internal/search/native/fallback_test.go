@@ -126,12 +126,8 @@ func TestFallbackPreservesMetadataAndOwnsResultSlices(t *testing.T) {
 }
 
 func TestFallbackNilAndSanitizedErrors(t *testing.T) {
-	var nilPointer *fallback
-	var nilFunction fallbackBackendFunc
-	for _, backend := range []search.Backend{nil, nilPointer, nilFunction} {
-		if NewFallback(backend) != nil {
-			t.Fatal("nil backend was wrapped")
-		}
+	if NewFallback(nil) != nil {
+		t.Fatal("nil backend was wrapped")
 	}
 	for _, expected := range []error{context.Canceled, context.DeadlineExceeded, search.ErrInvalidCursor, search.ErrExpiredCursor, search.ErrBusy, search.ErrUnavailable} {
 		backend := fallbackBackendFunc(func(context.Context, search.PageRequest) (search.Page, error) {

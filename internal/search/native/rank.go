@@ -10,7 +10,6 @@ import (
 )
 
 // Rank combines provider positions, literal title coverage and corroboration.
-// RankScore is an internal ordering heuristic, never an AI similarity score.
 // The caller filters requested categories; when both remain, close-quality
 // candidates receive a modest category-diversity preference.
 func Rank(query string, candidates []search.MediaResult, limit int) []search.MediaResult {

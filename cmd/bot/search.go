@@ -31,12 +31,13 @@ func searchBackend(cfg *config.Config, client *http.Client, logger *slog.Logger)
 		return legacy, func() {}
 	}
 	engine := stream.New(stream.Options{
-		Sources: native.NewSources(native.Options{HTTP: client, SafeSearch: cfg.SafeSearch}),
+		Sources: native.NewSources(native.Options{HTTP: client, SafeSearch: cfg.SafeSearch, MaxConcurrent: cfg.SearchMaxConcurrent}),
 		Rank:    native.Rank, Fallback: native.NewFallback(legacy),
 		FirstPageWait: cfg.NativeFirstPageWait, NativeTimeout: cfg.NativeTimeout,
 		Timeout: cfg.RequestTimeout, CacheTTL: cfg.CacheTTL, CacheSize: cfg.CacheSize,
-		// PageRequest.Limit caps each answer; keep a separate pool for scrolling.
-		MaxResults: 50, MaxConcurrent: cfg.SearchMaxConcurrent, Logger: logger,
+		// Pool for scrolling: ten pages of up to 50. The engine cuts it to ten
+		// pages of the actual page size (MAX_RESULTS, at most 24).
+		MaxResults: 500, MaxConcurrent: cfg.SearchMaxConcurrent, Logger: logger,
 	})
 	var backend search.Backend = engine
 	if cfg.Language != "" {

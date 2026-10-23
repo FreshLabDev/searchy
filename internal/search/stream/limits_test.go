@@ -344,3 +344,28 @@ func TestConcurrentSameCursorReturnsSameSnapshot(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestCursorRequestsExtendSessionButNewSearchGetsFreshSnapshot(t *testing.T) {
+	ttl := 300 * time.Millisecond
+	e := newEngine(t, Options{CacheTTL: ttl, MaxResults: 200, Sources: []search.Source{constantSource("static", media(0, 100))}})
+	r := request()
+	first, err := e.SearchPage(context.Background(), r)
+	if err != nil || first.NextOffset == "" {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	cursor := first.NextOffset
+	for i := 2; i <= 3; i++ {
+		time.Sleep(200 * time.Millisecond) // each step is under the TTL, the sum is over it
+		r.Offset = cursor
+		p, err := e.SearchPage(context.Background(), r)
+		if err != nil {
+			t.Fatalf("page %d: %v", i, err)
+		}
+		cursor = p.NextOffset
+	}
+	r.Offset = ""
+	fresh, err := e.SearchPage(context.Background(), r)
+	if err != nil || fresh.NextOffset == first.NextOffset {
+		t.Fatalf("new search reused a snapshot older than the TTL: %+v %v", fresh, err)
+	}
+}

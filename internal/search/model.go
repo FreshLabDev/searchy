@@ -86,7 +86,7 @@ type MediaResult struct {
 	Caption string
 }
 
-// SearchLanguage maps Searchy's 16 UI language codes to locales accepted by
+// SearchLanguage maps searchy's 16 UI language codes to locales accepted by
 // SearXNG. Unknown values fall back to English; Chinese needs an explicit script
 // and region in the currently deployed SearXNG locale list.
 func SearchLanguage(code string) string {

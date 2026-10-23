@@ -125,12 +125,12 @@ func TestStrictPublicHTTPSAndJPEGMedia(t *testing.T) {
 			t.Fatalf("accepted unsafe URL %q", raw)
 		}
 	}
-	for _, raw := range []string{"https://example.com/a.jpg", "https://example.com/a.JPEG", "https://tse1.mm.bing.net/th?id=OIP.abc&pid=Api", "https://upload.wikimedia.org/thumb/a/ab/Foo.tif/1280px-Foo.tif.jpg"} {
+	for _, raw := range []string{"https://example.com/a.jpg", "https://example.com/a.JPEG", "https://tse1.mm.bing.net/th?id=OIP.abc&pid=Api", "https://tse2.mm.bing.net/th/id/OVP.abc?pid=Api", "https://upload.wikimedia.org/thumb/a/ab/Foo.tif/1280px-Foo.tif.jpg"} {
 		if !validHTTPS(raw) || photoURL(raw) == "" {
 			t.Fatalf("rejected photo %q", raw)
 		}
 	}
-	for _, raw := range []string{"https://example.com/a.svg", "https://example.com/a.gif", "https://example.com/a.png", "https://example.com/a.webp", "https://example.com/a.jpg?fm=webp", "https://example.com/image", "https://example.com/watch?v=x", "https://tse1.mm.bing.net/a.gif"} {
+	for _, raw := range []string{"https://example.com/a.svg", "https://example.com/a.gif", "https://example.com/a.png", "https://example.com/a.webp", "https://example.com/a.jpg?fm=webp", "https://example.com/image", "https://example.com/watch?v=x", "https://tse1.mm.bing.net/a.gif", "https://tse1.mm.bing.net/th/id/", "https://tse1.mm.bing.net/th/id/a/b"} {
 		if photoURL(raw) != "" {
 			t.Fatalf("unsupported photo %q", raw)
 		}

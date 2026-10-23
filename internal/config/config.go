@@ -102,7 +102,7 @@ func Load() (*Config, error) {
 		SharedMediaCacheDir:   env("SHARED_MEDIA_CACHE_DIR", "/shared-media-cache"),
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
 		CoreDatabaseURL:       os.Getenv("CORE_DATABASE_URL"),
-		InlineCacheTime:       envInt("INLINE_CACHE_TIME", 300),
+		InlineCacheTime:       envInt("INLINE_CACHE_TIME", 60),
 		StatsCacheTTL:         envDur("STATS_CACHE_TTL", 10*time.Minute),
 	}
 

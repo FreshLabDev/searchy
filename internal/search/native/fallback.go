@@ -3,7 +3,6 @@ package native
 import (
 	"context"
 	"errors"
-	"reflect"
 	"slices"
 
 	"searchy/internal/search"
@@ -14,13 +13,6 @@ import (
 func NewFallback(backend search.Backend) search.Backend {
 	if backend == nil {
 		return nil
-	}
-	value := reflect.ValueOf(backend)
-	switch value.Kind() {
-	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
-		if value.IsNil() {
-			return nil
-		}
 	}
 	return fallback{backend: backend}
 }

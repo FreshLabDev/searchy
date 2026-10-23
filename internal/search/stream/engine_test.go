@@ -149,7 +149,7 @@ func TestFirstUsefulPageAndPendingContinuation(t *testing.T) {
 	r := request()
 	start := time.Now()
 	first, err := e.SearchPage(context.Background(), r)
-	if err != nil || len(first.Results) != 10 || first.NextOffset == "" || len(first.NextOffset) >= 64 || !first.Degraded {
+	if err != nil || len(first.Results) != 10 || first.NextOffset == "" || len(first.NextOffset) >= 64 || first.Degraded {
 		t.Fatalf("first page: %+v, %v", first, err)
 	}
 	if elapsed := time.Since(start); elapsed < 20*time.Millisecond || elapsed > 250*time.Millisecond {
@@ -558,5 +558,33 @@ func TestStringBoundsAndCursorEncryption(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "source=safe-source") || !strings.Contains(log.String(), "duration_ms=") {
 		t.Fatalf("missing safe diagnostics: %s", log.String())
+	}
+}
+
+func TestPausedSourceDoesNotMarkPageDegraded(t *testing.T) {
+	var calls atomic.Int32
+	e := newEngine(t, Options{Sources: []search.Source{
+		constantSource("healthy", media(0, 10)),
+		sourceFunc("paused", func(context.Context, search.SourceRequest) (search.SourcePage, error) {
+			calls.Add(1)
+			return search.SourcePage{}, search.ErrSourcePaused
+		}),
+	}})
+	p, err := e.SearchPage(context.Background(), request())
+	if err != nil || len(p.Results) != 10 || p.Degraded || calls.Load() != 1 {
+		t.Fatalf("page with a paused source: %+v %v calls=%d", p, err, calls.Load())
+	}
+}
+
+func TestFailedSourceMarksPageDegraded(t *testing.T) {
+	e := newEngine(t, Options{Sources: []search.Source{
+		constantSource("healthy", media(0, 10)),
+		sourceFunc("broken", func(context.Context, search.SourceRequest) (search.SourcePage, error) {
+			return search.SourcePage{}, errors.New("upstream HTTP 202")
+		}),
+	}})
+	p, err := e.SearchPage(context.Background(), request())
+	if err != nil || len(p.Results) != 10 || !p.Degraded {
+		t.Fatalf("page with a failed source: %+v %v", p, err)
 	}
 }

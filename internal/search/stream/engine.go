@@ -100,6 +100,7 @@ type session struct {
 	id        [16]byte
 	key       [32]byte
 	created   time.Time
+	touched   time.Time // last cursor request; a session lives CacheTTL past it
 	element   *list.Element
 	states    []continuation
 	fallback  continuation
@@ -304,8 +305,15 @@ func (e *Engine) SearchPage(ctx context.Context, r search.PageRequest) (search.P
 			e.mu.Unlock()
 			return search.Page{}, search.ErrInvalidCursor
 		}
+		s.touched = time.Now()
 	} else {
 		s = e.byKey[key]
+		// A scrolling user keeps an old session alive for its cursors, but a
+		// new search must not be served a snapshot older than CacheTTL.
+		if s != nil && time.Since(s.created) >= e.options.CacheTTL {
+			e.unlinkKeyLocked(s)
+			s = nil
+		}
 		// Partially failed searches keep their issued cursors, but a fresh search
 		// retries upstream work instead of caching the failure for five minutes.
 		if s != nil && s.retry && len(s.pages) > 0 {
@@ -369,7 +377,7 @@ func (e *Engine) SearchPage(ctx context.Context, r search.PageRequest) (search.P
 			e.mu.Unlock()
 			return search.Page{}, context.Canceled
 		}
-		if s.evicted || time.Since(s.created) >= e.options.CacheTTL {
+		if s.evicted || time.Since(s.touched) >= e.options.CacheTTL {
 			e.removeLocked(s)
 			e.mu.Unlock()
 			return search.Page{}, search.ErrExpiredCursor
@@ -395,9 +403,9 @@ func (e *Engine) SearchPage(ctx context.Context, r search.PageRequest) (search.P
 			if r.WaitAll {
 				n = min(s.budget, len(s.pool))
 			}
-			// Telegram needs a short cache lifetime for a partial snapshot even
-			// if its outstanding sources eventually complete successfully.
-			f := frozenPage{results: cloneResults(s.pool[:n]), degraded: s.degraded || s.job != nil}
+			// Degraded means a source failed. A page sent while slow sources are
+			// still running is complete as frozen: their results go to later pages.
+			f := frozenPage{results: cloneResults(s.pool[:n]), degraded: s.degraded}
 			// A small frozen slice must not pin an entire old lookahead array.
 			s.pool = cloneResults(s.pool[n:])
 			for _, result := range f.results {
@@ -427,7 +435,8 @@ func (e *Engine) SearchPage(ctx context.Context, r search.PageRequest) (search.P
 }
 
 func (e *Engine) newSessionLocked(key [32]byte, r search.PageRequest) *session {
-	s := &session{key: key, created: time.Now(), states: make([]continuation, len(e.sources)), delivered: make(map[[32]byte]struct{}), leases: make(map[[32]byte]struct{}), budget: e.options.MaxResults}
+	now := time.Now()
+	s := &session{key: key, created: now, touched: now, states: make([]continuation, len(e.sources)), delivered: make(map[[32]byte]struct{}), leases: make(map[[32]byte]struct{}), budget: e.options.MaxResults}
 	if _, err := rand.Read(s.id[:]); err != nil {
 		panic("stream: secure random unavailable")
 	}
@@ -586,7 +595,7 @@ func (e *Engine) removeLocked(s *session) {
 
 func (e *Engine) expireLocked(now time.Time) {
 	for _, s := range e.byID {
-		if now.Sub(s.created) >= e.options.CacheTTL {
+		if now.Sub(s.touched) >= e.options.CacheTTL {
 			e.removeLocked(s)
 		}
 	}

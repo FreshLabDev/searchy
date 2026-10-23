@@ -523,12 +523,12 @@ func TestHTTPBoundsAndCancellation(t *testing.T) {
 			resp := fixtureResponse(strings.Repeat("x", maxBody+1))
 			resp.ContentLength = contentLength
 			return resp, nil
-		})})
+		})}, 0)
 		if _, err := h.get(context.Background(), "https://www.bing.com/images/async?q=private", "en", ""); !errors.Is(err, errTooLarge) {
 			t.Fatal(err)
 		}
 	}
-	h := newFetcher(&http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() })})
+	h := newFetcher(&http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) { <-r.Context().Done(); return nil, r.Context().Err() })}, 0)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	if _, err := h.get(ctx, "https://www.bing.com/images/async?q=private", "en", ""); !errors.Is(err, context.DeadlineExceeded) {
@@ -547,7 +547,7 @@ func TestHTTPBoundsAndCancellation(t *testing.T) {
 		case <-r.Context().Done():
 			return nil, r.Context().Err()
 		}
-	})})
+	})}, 0)
 	var wg sync.WaitGroup
 	for range 20 {
 		wg.Go(func() { _, _ = h.get(context.Background(), "https://www.bing.com/images/async", "en", "") })
@@ -560,8 +560,31 @@ func TestHTTPBoundsAndCancellation(t *testing.T) {
 	}
 }
 
+func TestHTTPConcurrencyFollowsOption(t *testing.T) {
+	var active, maxActive atomic.Int32
+	release := make(chan struct{})
+	h := newFetcher(&http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		n := active.Add(1)
+		for old := maxActive.Load(); n > old && !maxActive.CompareAndSwap(old, n); old = maxActive.Load() {
+		}
+		defer active.Add(-1)
+		<-release
+		return fixtureResponse("ok"), nil
+	})}, 20)
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() { _, _ = h.get(context.Background(), "https://www.bing.com/images/async", "en", "") })
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if maxActive.Load() != 20 {
+		t.Fatalf("concurrency=%d, want 20", maxActive.Load())
+	}
+}
+
 func TestRedirectPolicyPinsOriginAndHTTPS(t *testing.T) {
-	h := newFetcher(nil)
+	h := newFetcher(nil, 0)
 	initial, _ := http.NewRequest(http.MethodGet, "https://www.bing.com/images/async?q=private", nil)
 	for _, raw := range []string{"http://www.bing.com/images/async", "https://127.0.0.1/", "https://evil.example.com/", "https://duckduckgo.com/", "https://www.bing.com:8443/"} {
 		req, _ := http.NewRequest(http.MethodGet, raw, nil)
@@ -582,7 +605,7 @@ func TestRedirectPolicyPinsOriginAndHTTPS(t *testing.T) {
 		resp.StatusCode = 302
 		resp.Header.Set("Location", "https://127.0.0.1/private-query")
 		return resp, nil
-	})})
+	})}, 0)
 	if _, err := h.get(context.Background(), "https://www.bing.com/images/async?q=private-query", "en", ""); err == nil || strings.Contains(err.Error(), "private-query") || count != 1 {
 		t.Fatalf("err=%v calls=%d", err, count)
 	}
@@ -593,7 +616,7 @@ func TestHTTPStatusIsSanitized(t *testing.T) {
 		resp := fixtureResponse("secret-query")
 		resp.StatusCode = 429
 		return resp, nil
-	})})
+	})}, 0)
 	if _, err := h.get(context.Background(), "https://www.bing.com/images/async?q=secret-query", "en", ""); err == nil || strings.Contains(err.Error(), "secret-query") || !strings.Contains(err.Error(), "429") {
 		t.Fatal(err)
 	}
@@ -620,5 +643,43 @@ func TestCursorNeverControlsRequestDestination(t *testing.T) {
 		if _, err := decodeDuckCursor(raw); !errors.Is(err, search.ErrInvalidCursor) {
 			t.Fatalf("accepted cursor %q", raw)
 		}
+	}
+}
+
+func TestDuckChallengePausesOnlyThatCategory(t *testing.T) {
+	var imageCalls, videoCalls atomic.Int32
+	sources := fixtureSources(t, 0, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/":
+			return fixtureResponse(`vqd="4-123-456"`), nil
+		case "/i.js":
+			imageCalls.Add(1)
+			response := fixtureResponse(`{"challenge":{}}`)
+			response.StatusCode = http.StatusAccepted
+			return response, nil
+		default:
+			videoCalls.Add(1)
+			return fixtureResponse(`{"results":[]}`), nil
+		}
+	})
+	images := sourceFor(t, sources, "DuckDuckGo images")
+	request := search.SourceRequest{Query: "secret-query"}
+	for range 3 {
+		if _, err := images.SearchSource(context.Background(), request); !errors.Is(err, search.ErrSourcePaused) {
+			t.Fatalf("challenge err = %v", err)
+		}
+	}
+	if imageCalls.Load() != 1 {
+		t.Fatalf("paused source called upstream %d times", imageCalls.Load())
+	}
+	if _, err := sourceFor(t, sources, "DuckDuckGo videos").SearchSource(context.Background(), request); err != nil || videoCalls.Load() != 1 {
+		t.Fatalf("videos paused with images: err=%v calls=%d", err, videoCalls.Load())
+	}
+	duck := images.(*duckSource)
+	duck.mu.Lock()
+	duck.pausedUntil = time.Now().Add(-time.Second)
+	duck.mu.Unlock()
+	if _, err := images.SearchSource(context.Background(), request); !errors.Is(err, search.ErrSourcePaused) || imageCalls.Load() != 2 {
+		t.Fatalf("expired pause did not retry: err=%v calls=%d", err, imageCalls.Load())
 	}
 }

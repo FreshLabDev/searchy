@@ -33,6 +33,10 @@ var (
 	ErrInvalidCursor = errors.New("invalid search cursor")
 	ErrBusy          = errors.New("search capacity reached")
 	ErrUnavailable   = errors.New("search sources unavailable")
+	// ErrSourcePaused means a source is switched off for a while, for example
+	// after a provider challenge. It ends that source for the search without
+	// marking the page degraded, because retrying it would only fail again.
+	ErrSourcePaused = errors.New("search source paused")
 )
 
 type Backend interface {
@@ -59,6 +63,9 @@ type Source interface {
 	SearchSource(context.Context, SourceRequest) (SourcePage, error)
 }
 
+// legacyMaxPages bounds SearXNG paging so scrolling cannot drive it forever.
+const legacyMaxPages = 10
+
 // LegacyBackend keeps the existing aggregator available as an explicit backend
 // and as a bounded fallback, without changing its ranking or engine pools.
 type LegacyBackend struct {
@@ -70,7 +77,7 @@ func (b LegacyBackend) SearchPage(ctx context.Context, r PageRequest) (Page, err
 	page := 0
 	if r.Offset != "" {
 		n, err := strconv.Atoi(r.Offset)
-		if err != nil || n < 0 || n >= 10 {
+		if err != nil || n < 0 || n >= legacyMaxPages {
 			return Page{}, ErrInvalidCursor
 		}
 		page = n
@@ -101,7 +108,7 @@ func (b LegacyBackend) SearchPage(ctx context.Context, r PageRequest) (Page, err
 	// The legacy aggregator owns its page size. Keep its complete page to
 	// avoid dropping the tail between independent upstream pages.
 	next := ""
-	if more && len(results) > 0 && page+1 < 10 {
+	if more && len(results) > 0 && page+1 < legacyMaxPages {
 		next = strconv.Itoa(page + 1)
 	}
 	return Page{Results: results, NextOffset: next, Degraded: degraded}, nil

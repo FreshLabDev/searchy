@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"html"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -42,6 +43,26 @@ type tokenEntry struct {
 type duckSource struct {
 	ddg      *duckDuckGo
 	category search.Category
+
+	mu          sync.Mutex
+	pausedUntil time.Time
+}
+
+// duckPause is how long a category stays off after DuckDuckGo answers its
+// JSON endpoint with a 202 challenge. Images get one on every request now;
+// asking again within minutes only adds a failed call to each search.
+const duckPause = 10 * time.Minute
+
+func (d *duckSource) paused() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return time.Now().Before(d.pausedUntil)
+}
+
+func (d *duckSource) pause() {
+	d.mu.Lock()
+	d.pausedUntil = time.Now().Add(duckPause)
+	d.mu.Unlock()
 }
 
 func (d *duckSource) Name() string              { return "DuckDuckGo " + string(d.category) }
@@ -197,6 +218,9 @@ func decodeDuckCursor(raw string) (duckCursor, error) {
 }
 
 func (d *duckSource) SearchSource(ctx context.Context, request search.SourceRequest) (search.SourcePage, error) {
+	if d.paused() {
+		return search.SourcePage{}, search.ErrSourcePaused
+	}
 	cursor, err := decodeDuckCursor(request.Cursor)
 	if err != nil {
 		return search.SourcePage{}, err
@@ -224,6 +248,10 @@ func (d *duckSource) SearchSource(ctx context.Context, request search.SourceRequ
 		endpoint = "/v.js"
 	}
 	body, err := d.ddg.http.get(ctx, "https://duckduckgo.com"+endpoint+"?"+params.Encode(), l.acceptLanguage(), cookie)
+	if status := statusError(0); errors.As(err, &status) && status == http.StatusAccepted {
+		d.pause()
+		return search.SourcePage{}, search.ErrSourcePaused
+	}
 	if err != nil {
 		return search.SourcePage{}, err
 	}

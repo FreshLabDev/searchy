@@ -43,7 +43,7 @@ func TestInitialSourcesPrecedeContinuationsWithOneSlot(t *testing.T) {
 			r.WaitAll = waitAll
 			start := time.Now()
 			p, err := e.SearchPage(context.Background(), r)
-			if err != nil || len(p.Results) != 10 || !p.Degraded {
+			if err != nil || len(p.Results) != 10 || p.Degraded != waitAll {
 				t.Fatalf("initial fairness: %+v %v", p, err)
 			}
 			if !waitAll && time.Since(start) > 80*time.Millisecond {
@@ -84,7 +84,7 @@ func TestUsefulSingletonReturnsAtQualityWindow(t *testing.T) {
 	start := time.Now()
 	p, err := e.SearchPage(context.Background(), r)
 	elapsed := time.Since(start)
-	if err != nil || len(p.Results) != 1 || !p.Degraded || p.NextOffset == "" {
+	if err != nil || len(p.Results) != 1 || p.Degraded || p.NextOffset == "" {
 		t.Fatalf("useful singleton: %+v %v", p, err)
 	}
 	if elapsed < 15*time.Millisecond || elapsed > 80*time.Millisecond {

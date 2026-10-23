@@ -17,14 +17,15 @@ import (
 )
 
 type Options struct {
-	HTTP       *http.Client
-	SafeSearch int
+	HTTP          *http.Client
+	SafeSearch    int
+	MaxConcurrent int // simultaneous upstream requests; 0 means 8
 }
 
 // NewSources shares transport limits and DDG token acquisition across categories.
 // Commons has no adult-content filter and is excluded from filtered searches.
 func NewSources(o Options) []search.Source {
-	h := newFetcher(o.HTTP)
+	h := newFetcher(o.HTTP, o.MaxConcurrent)
 	safe := o.SafeSearch
 	if safe < 0 || safe > 2 {
 		safe = 2
@@ -62,7 +63,10 @@ type fetcher struct {
 	active chan struct{}
 }
 
-func newFetcher(client *http.Client) *fetcher {
+func newFetcher(client *http.Client, limit int) *fetcher {
+	if limit <= 0 {
+		limit = 8
+	}
 	var c http.Client
 	if client != nil {
 		c = *client
@@ -81,7 +85,7 @@ func newFetcher(client *http.Client) *fetcher {
 		}
 		return nil
 	}
-	return &fetcher{client: c, active: make(chan struct{}, 8)}
+	return &fetcher{client: c, active: make(chan struct{}, limit)}
 }
 
 func allowedUpstream(u *url.URL) bool {
@@ -129,7 +133,7 @@ func (h *fetcher) get(ctx context.Context, raw, language, cookie string) ([]byte
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search upstream HTTP %d", resp.StatusCode)
+		return nil, statusError(resp.StatusCode)
 	}
 	if resp.ContentLength > maxBody {
 		return nil, errTooLarge
@@ -146,6 +150,11 @@ func (h *fetcher) get(ctx context.Context, raw, language, cookie string) ([]byte
 	}
 	return body, nil
 }
+
+// statusError is a non-200 upstream answer. It carries only the status code.
+type statusError int
+
+func (e statusError) Error() string { return fmt.Sprintf("search upstream HTTP %d", int(e)) }
 
 func numericCursor(raw string, initial int) (int, error) {
 	if raw == "" {

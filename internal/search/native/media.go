@@ -70,7 +70,7 @@ func photoURL(raw string) string {
 		return raw
 	}
 	host := strings.ToLower(u.Hostname())
-	if strings.HasSuffix(host, ".mm.bing.net") && (u.Path == "/th" || u.Path == "/th/") && u.Query().Get("id") != "" {
+	if bingThumbnail(u) {
 		return raw
 	}
 	if strings.HasSuffix(host, ".ytimg.com") || host == "i.ytimg.com" {
@@ -97,7 +97,21 @@ func providerJPEGPreview(raw string) bool {
 		return false
 	}
 	u, _ := url.Parse(raw)
-	return strings.HasSuffix(strings.ToLower(u.Hostname()), ".mm.bing.net") && (u.Path == "/th" || u.Path == "/th/") && u.Query().Get("id") != ""
+	return bingThumbnail(u)
+}
+
+// bingThumbnail matches Bing's JPEG thumbnail service in both of its URL shapes:
+// /th?id=OIP.x (Bing Images) and /th/id/OVP.x (Bing video covers, also used by
+// DuckDuckGo Videos).
+func bingThumbnail(u *url.URL) bool {
+	if !strings.HasSuffix(strings.ToLower(u.Hostname()), ".mm.bing.net") {
+		return false
+	}
+	if u.Path == "/th" || u.Path == "/th/" {
+		return u.Query().Get("id") != ""
+	}
+	id, ok := strings.CutPrefix(u.Path, "/th/id/")
+	return ok && id != "" && !strings.Contains(id, "/")
 }
 
 func resultID(category search.Category, raw string) string {
