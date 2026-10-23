@@ -13,10 +13,13 @@ func TestSearchModesAndErrorsHaveEveryLocale(t *testing.T) {
 				t.Errorf("%s has no %s translation", key, lang.Code)
 			}
 			if strings.HasPrefix(key, "help.") || key == "inline.prompt.desc" {
-				for _, prefix := range []string{"i:", "v:", "f:"} {
+				for _, prefix := range []string{"i:", "v:"} {
 					if !strings.Contains(text, prefix) {
 						t.Errorf("%s/%s does not explain %s", key, lang.Code, prefix)
 					}
+				}
+				if strings.Contains(text, "f:") {
+					t.Errorf("%s/%s still mentions the removed f: prefix", key, lang.Code)
 				}
 			}
 			if lang.Code != DefaultLang && text == translations[key][DefaultLang] {

@@ -46,7 +46,7 @@ func buildInlineResults(results []search.MediaResult, lang string, downloadURLs 
 }
 
 // videoButtons builds the video card keyboard: an "Open on <platform>" link
-// button (vido style) and an owner-bound Vido download action.
+// button (vido style) and an owner-bound vido download action.
 type downloadButton struct {
 	URL          string
 	CallbackData string

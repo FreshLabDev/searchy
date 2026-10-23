@@ -97,7 +97,7 @@ func TestInlineUsesOpaqueBackendCursorAndOwner(t *testing.T) {
 				return search.Page{Results: []search.MediaResult{result}, NextOffset: next}, nil
 			})})
 			h.Route(context.Background(), &tg.Update{InlineQuery: &tg.InlineQuery{
-				ID: "inline-1", Query: " F:V: literal  i: middle ", Offset: offset,
+				ID: "inline-1", Query: " V: literal  i: middle ", Offset: offset,
 				From: tg.User{ID: 42, LanguageCode: "zh-CN"},
 			}})
 			if got.Query != "literal  i: middle" || !slices.Equal(got.Categories, []search.Category{search.CatVideo}) ||
@@ -120,19 +120,19 @@ func TestInlineUsesOpaqueBackendCursorAndOwner(t *testing.T) {
 	}
 }
 
-func TestInlineFastAliasPreservesMixAndShortCachesDegradedPage(t *testing.T) {
+func TestInlineMixedSearchShortCachesDegradedPage(t *testing.T) {
 	for _, degraded := range []bool{false, true} {
 		t.Run(fmt.Sprint(degraded), func(t *testing.T) {
 			h, calls := newSearchTestHandlers(t, Options{MaxResults: 7, Backend: backendFunc(func(_ context.Context, req search.PageRequest) (search.Page, error) {
 				if req.Query != "cats" || !slices.Equal(req.Categories, []search.Category{search.CatImage, search.CatVideo}) || req.Limit != 7 {
-					t.Errorf("fast alias request = %+v", req)
+					t.Errorf("mixed inline request = %+v", req)
 				}
 				return search.Page{Results: []search.MediaResult{{
 					ID: "image", Category: search.CatImage, Engine: "native-image",
 					MediaURL: "https://media.example/image.jpg", ThumbURL: "https://media.example/thumb.jpg",
 				}}, Degraded: degraded}, nil
 			})})
-			h.onInline(context.Background(), &tg.InlineQuery{ID: "fast", Query: "f:cats", From: tg.User{ID: 7}})
+			h.onInline(context.Background(), &tg.InlineQuery{ID: "mixed", Query: "cats", From: tg.User{ID: 7}})
 			fields := receiveTelegramCall(t, calls, "answerInlineQuery")
 			cacheTime := "300"
 			if degraded {
@@ -196,7 +196,7 @@ func TestInlineBackendErrorsAreLocalizedAndRetryable(t *testing.T) {
 }
 
 func TestInlineSupersededRequestsNeverAnswer(t *testing.T) {
-	for _, newer := range []string{"new query", "", "F:I:"} {
+	for _, newer := range []string{"new query", "", "I:"} {
 		t.Run("new="+newer, func(t *testing.T) {
 			started := make(chan struct{})
 			finished := make(chan struct{})
@@ -310,7 +310,7 @@ func TestGridBackendWaitsForPoolAndPaginatesLocally(t *testing.T) {
 		return search.Page{Results: results, NextOffset: "unused-stream-cursor", Degraded: true}, nil
 	})})
 	h.Route(context.Background(), &tg.Update{Message: &tg.Message{
-		Text: "/search F:I: cats  and  dogs", MessageThreadID: 7,
+		Text: "/search I: cats  and  dogs", MessageThreadID: 7,
 		Chat: tg.Chat{ID: -42, Type: tg.ChatSupergroup}, From: &tg.User{ID: 123, LanguageCode: "pl"},
 	}})
 	if got.Query != "cats  and  dogs" || !slices.Equal(got.Categories, []search.Category{search.CatImage}) ||
@@ -361,7 +361,7 @@ func TestGridBackendErrorsOfferLocalizedRetry(t *testing.T) {
 				}
 				return search.Page{}, tt.err
 			})})
-			h.runGridSearch(context.Background(), 42, 0, &tg.User{ID: 42, LanguageCode: "ru"}, "v:f:cats", "dm")
+			h.runGridSearch(context.Background(), 42, 0, &tg.User{ID: 42, LanguageCode: "ru"}, "v:cats", "dm")
 			fields := receiveTelegramCall(t, calls, "sendMessage")
 			if fields["text"] != i18n.T("ru", tt.key) || !strings.Contains(fields["reply_markup"], "switch_inline_query_current_chat") {
 				t.Fatalf("grid retry = %+v", fields)

@@ -1,6 +1,6 @@
-// Package vido is Searchy's least-privilege client for the durable Vido bridge.
-// Searchy can create owner-bound intents and deliver plans, but cannot read the
-// Vido tables or selected source URLs back from Postgres.
+// Package vido is searchy's least-privilege client for the durable vido bridge.
+// searchy can create owner-bound intents and deliver plans, but cannot read the
+// vido tables or selected source URLs back from Postgres.
 package vido
 
 import (
@@ -46,7 +46,7 @@ func Open(ctx context.Context, databaseURL string) (*Bridge, error) {
 	}
 	// Keep the pool alive when core is temporarily unavailable at startup.
 	// pgx reconnects lazily, so buttons and workers recover without restarting
-	// Searchy; /healthz remains degraded until Healthy succeeds.
+	// searchy; /healthz remains degraded until Healthy succeeds.
 	return &Bridge{pool: pool}, nil
 }
 
@@ -117,9 +117,9 @@ type SharedDMIntentArgs struct {
 	MessageID   int
 }
 
-// MintSharedDMIntent derives a personal Vido deep-link intent from an exact
-// bound Searchy card. The source URL remains inside Core and is never returned
-// to Searchy.
+// MintSharedDMIntent derives a personal vido deep-link intent from an exact
+// bound searchy card. The source URL remains inside Core and is never returned
+// to searchy.
 func (b *Bridge) MintSharedDMIntent(ctx context.Context, a SharedDMIntentArgs) (string, error) {
 	if !b.Ready() {
 		return "", errors.New("vido bridge unavailable")

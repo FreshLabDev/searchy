@@ -39,7 +39,7 @@ func updateWorkers(n int) int {
 // The offset therefore advances as soon as an update is dispatched, not once
 // it is finished. Confirming work that is still running loses an update if the
 // process dies mid-flight; the alternative is a poll loop held hostage by a
-// query the debouncer is deliberately doing nothing about. Searchy's work is a
+// query the debouncer is deliberately doing nothing about. searchy's work is a
 // stateless search with no bookkeeping to reconcile, so a lost update costs a
 // user one retyped query -- which is what the previous dispatcher did too.
 func (h *Handlers) Run(ctx context.Context) error {

@@ -1,4 +1,4 @@
-// Command searchbench compares Searchy's v0.1-style engine interleave with the
+// Command searchbench compares searchy's v0.1-style engine interleave with the
 // current ranked core/discovery pipeline. Its corpus is synthetic and fixed;
 // the tool never reads production queries or writes a report to disk.
 package main
@@ -154,7 +154,7 @@ func main() {
 	}
 	out := report{GeneratedAt: time.Now().UTC().Format(time.RFC3339), Mode: *mode}
 	if *mode == "native" || *mode == "compare-native" {
-		out.Timing = "first page ready, 24 results maximum, retrieval cache cold per distinct case; excludes Telegram/debounce/Vido/client thumbnail loading; native has no SearXNG fallback; keyword relevance is only a text heuristic"
+		out.Timing = "first page ready, 24 results maximum, retrieval cache cold per distinct case; excludes Telegram/debounce/vido/client thumbnail loading; native has no SearXNG fallback; keyword relevance is only a text heuristic"
 	}
 	for _, benchmark := range cases {
 		group := groupOf(benchmark.ID)

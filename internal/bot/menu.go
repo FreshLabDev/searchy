@@ -284,7 +284,7 @@ func aboutPanel(lang string, owner int64, inGroup bool) (string, *tg.InlineKeybo
 	var b strings.Builder
 	// Same title card as every other screen; the About card is the one place
 	// the family writes the hint (here, the version) on the title's own line.
-	b.WriteString(titleCard("Searchy", "v"+aboutVersion(buildinfo.Version), " · ") + "\n")
+	b.WriteString(titleCard("searchy", "v"+aboutVersion(buildinfo.Version), " · ") + "\n")
 	b.WriteString(i18n.T(lang, "about.tagline"))
 	b.WriteString("\n\n")
 	b.WriteString(blockquote(

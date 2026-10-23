@@ -244,7 +244,7 @@ func (h *Handlers) onChosen(cr *tg.ChosenInlineResult) {
 	}()
 }
 
-// ---- callbacks (menu + owner-bound Vido downloads) ----
+// ---- callbacks (menu + owner-bound vido downloads) ----
 
 func (h *Handlers) onCallback(ctx context.Context, cq *tg.CallbackQuery) {
 	if token, kind, ok := parseDownloadCB(cq.Data); ok {
@@ -650,15 +650,13 @@ func parseCommand(text, botUsername string) (cmd, arg string, forUs bool) {
 func parseQuery(raw string) ([]search.Category, string) {
 	q := strings.TrimSpace(raw)
 	cats := []search.Category{search.CatImage, search.CatVideo}
-	// Only the leading prefix chain is syntax. The last i:/v: wins; f: is an
-	// alias for ordinary fast search and never changes the category/source mix.
+	// Only the leading prefix chain is syntax; the last i:/v: wins.
 	for len(q) >= 2 && q[1] == ':' {
 		switch q[0] {
 		case 'i', 'I':
 			cats = []search.Category{search.CatImage}
 		case 'v', 'V':
 			cats = []search.Category{search.CatVideo}
-		case 'f', 'F':
 		default:
 			return cats, q
 		}

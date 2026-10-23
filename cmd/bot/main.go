@@ -182,7 +182,7 @@ func main() {
 // API server too old to serve it refuses the start instead of letting the bot
 // poll happily and answer nothing.
 //
-// The media sends below are only reachable through the Vido bridge, so they
+// The media sends below are only reachable through the vido bridge, so they
 // are required only when it is on: a searchy running without the bridge should
 // not refuse to start over a delivery path it will never take.
 func requiredMethods(vidoBridge bool) []string {

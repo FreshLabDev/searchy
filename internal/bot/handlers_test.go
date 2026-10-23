@@ -23,21 +23,20 @@ func TestParseQuery(t *testing.T) {
 		{"i: cats", []search.Category{search.CatImage}, "cats"},
 		{"v:funny clip", []search.Category{search.CatVideo}, "funny clip"},
 		{"I: Dogs", []search.Category{search.CatImage}, "Dogs"},
-		{"  \tF:\n I:\t cats  and  dogs \n", []search.Category{search.CatImage}, "cats  and  dogs"},
-		{"f:", []search.Category{search.CatImage, search.CatVideo}, ""},
-		{" I: F: V: \t", []search.Category{search.CatVideo}, ""},
+		{"  \t\n I:\t cats  and  dogs \n", []search.Category{search.CatImage}, "cats  and  dogs"},
+		{" I: V: \t", []search.Category{search.CatVideo}, ""},
+		{"f: cats", []search.Category{search.CatImage, search.CatVideo}, "f: cats"},
 		{"i:v:i:cats", []search.Category{search.CatImage}, "cats"},
 		{"v:i:v:cats", []search.Category{search.CatVideo}, "cats"},
-		{"f:f:cats", []search.Category{search.CatImage, search.CatVideo}, "cats"},
 		{"ai: cats", []search.Category{search.CatImage, search.CatVideo}, "ai: cats"},
 		{"i:ai: cats", []search.Category{search.CatImage}, "ai: cats"},
 		{"find i: cats f: videos", []search.Category{search.CatImage, search.CatVideo}, "find i: cats f: videos"},
 		{"https://example.com/f:i:v:cats", []search.Category{search.CatImage, search.CatVideo}, "https://example.com/f:i:v:cats"},
-		{"f:https://example.com/i:cats", []search.Category{search.CatImage, search.CatVideo}, "https://example.com/i:cats"},
+		{"i:https://example.com/v:cats", []search.Category{search.CatImage}, "https://example.com/v:cats"},
 		{"i: file f:cat v:dog", []search.Category{search.CatImage}, "file f:cat v:dog"},
 		{"file:cat", []search.Category{search.CatImage, search.CatVideo}, "file:cat"},
 		{"i :cat", []search.Category{search.CatImage, search.CatVideo}, "i :cat"},
-		{"f::cat", []search.Category{search.CatImage, search.CatVideo}, ":cat"},
+		{"i::cat", []search.Category{search.CatImage}, ":cat"},
 		{"", []search.Category{search.CatImage, search.CatVideo}, ""},
 	}
 	for _, c := range cases {
@@ -59,7 +58,7 @@ func TestParseQuery(t *testing.T) {
 }
 
 func TestParseQueryPrefixOrders(t *testing.T) {
-	for _, prefixes := range []string{"i", "v", "f", "if", "fi", "vf", "fv", "iv", "vi", "ivf", "ifv", "vif", "vfi", "fiv", "fvi"} {
+	for _, prefixes := range []string{"i", "v", "iv", "vi"} {
 		for _, separator := range []string{"", " ", "\t\n", "\u2003"} {
 			var b strings.Builder
 			want := []search.Category{search.CatImage, search.CatVideo}
@@ -72,9 +71,9 @@ func TestParseQueryPrefixOrders(t *testing.T) {
 					want = []search.Category{search.CatVideo}
 				}
 			}
-			input := b.String() + "Literal  Query f:inside"
+			input := b.String() + "Literal  Query v:inside"
 			cats, q := parseQuery(input)
-			if !slices.Equal(cats, want) || q != "Literal  Query f:inside" {
+			if !slices.Equal(cats, want) || q != "Literal  Query v:inside" {
 				t.Errorf("parseQuery(%q) = %v, %q; want %v with literal query", input, cats, q, want)
 			}
 		}

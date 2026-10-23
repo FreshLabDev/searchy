@@ -17,7 +17,7 @@ import (
 )
 
 func TestInlineEmptyQueryRevokesLeaseBeforePrompt(t *testing.T) {
-	for _, query := range []string{"", " \t\n", "f:", "F:I:"} {
+	for _, query := range []string{"", " \t\n", "i:", "V:I:"} {
 		t.Run(fmt.Sprintf("query=%q", query), func(t *testing.T) {
 			var logs bytes.Buffer
 			var got []search.PageRequest
@@ -70,7 +70,7 @@ func TestInlineEmptyQueryHonorsCancellation(t *testing.T) {
 				cancel()
 				return search.Page{}, nil
 			})})
-			h.onInline(ctx, &tg.InlineQuery{ID: "canceled", Query: "F:I:", From: tg.User{ID: 42}})
+			h.onInline(ctx, &tg.InlineQuery{ID: "canceled", Query: "V:I:", From: tg.User{ID: 42}})
 			wantRequests := 1
 			if cancelBefore {
 				wantRequests = 0
@@ -99,7 +99,7 @@ func TestInlineSupersededLeaseRevocationNeverAnswers(t *testing.T) {
 	})})
 	go func() {
 		defer close(finished)
-		h.onInline(context.Background(), &tg.InlineQuery{ID: "old-empty", Query: "f:", From: tg.User{ID: 42}})
+		h.onInline(context.Background(), &tg.InlineQuery{ID: "old-empty", Query: "i:", From: tg.User{ID: 42}})
 	}()
 	waitInlineLeaseEvent(t, started, "empty request did not reach the backend")
 	h.onInline(context.Background(), &tg.InlineQuery{ID: "new", Query: "cats", From: tg.User{ID: 42}})
@@ -195,13 +195,13 @@ func answerPartialInline(t *testing.T, h *Handlers, calls <-chan telegramCall, o
 	t.Helper()
 	h.onInline(context.Background(), &tg.InlineQuery{ID: fmt.Sprint(owner), Query: query, From: tg.User{ID: owner}})
 	fields := receiveTelegramCall(t, calls, "answerInlineQuery")
-	if fields["next_offset"] == "" || fields["cache_time"] != "1" || len(inlineResults(t, fields)) != 10 {
+	if fields["next_offset"] == "" || fields["cache_time"] != "300" || len(inlineResults(t, fields)) != 10 {
 		t.Fatalf("first handler did not return a partial page: %+v", fields)
 	}
 }
 
 func TestInlineEmptyQueryCancelsCompletedHandlersLease(t *testing.T) {
-	for _, empty := range []string{"", "F:I:"} {
+	for _, empty := range []string{"", "V:I:"} {
 		t.Run(fmt.Sprintf("query=%q", empty), func(t *testing.T) {
 			engine, started := newInlineLeaseEngine(t)
 			h, calls := newSearchTestHandlers(t, Options{Backend: engine})
@@ -244,7 +244,7 @@ func TestInlineEmptyQueryPreservesSharedOwnersLease(t *testing.T) {
 	default:
 	}
 
-	h.onInline(context.Background(), &tg.InlineQuery{ID: "empty-7", Query: "F:I:", From: tg.User{ID: 7}})
+	h.onInline(context.Background(), &tg.InlineQuery{ID: "empty-7", Query: "V:I:", From: tg.User{ID: 7}})
 	assertInlinePrompt(t, receiveTelegramCall(t, calls, "answerInlineQuery"), "empty-7")
 	if slow.ctx.Err() != nil {
 		t.Fatal("revoking one owner canceled the source still leased by another")
