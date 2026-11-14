@@ -11,6 +11,44 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
+## v1.0.0 - 2026-11-14
+
+searchy searches by itself. The private SearXNG instance is no longer needed:
+Bing, DuckDuckGo and Wikimedia are queried directly from Go, the first page
+arrives while slower sources are still running, and inline scrolling goes
+ten pages deep. This is `v1.0.0-alpha.2`, which has run the primary bot since
+23 October, plus a Go security update. Coming from `v0.2.3`, read both alphas
+under this section; the two things an operator has to act on are below.
+
+Since 23 October alpha.2 answered 350 inline searches from 13 people, 18 in
+DMs and 1 in a group, with no errors logged. The results people picked came
+from Bing images (62), DuckDuckGo videos (30), Bing videos (25), DuckDuckGo
+images (18) and Wikimedia (3).
+
+### Breaking
+
+- **Operators.** The default backend is native search, not SearXNG. Set
+  `SEARCH_BACKEND=searxng` to keep the old one. See `v1.0.0-alpha.1`.
+- **Operators.** `INLINE_CACHE_TIME` defaults to `60` seconds. If `.env` sets
+  it explicitly, lower it to `60` or remove the line. See `v1.0.0-alpha.2`.
+
+### Security
+
+- Go moves from 1.26.10 to 1.26.11: a crafted HTTP/1 request could crash
+  the server through a race on the `MaxBytesReader` header (GO-2026-6859).
+  This update went into the stable version without an alpha of its own; it
+  changes no code of searchy's, and the tests and `govulncheck` pass on it.
+
+### Known Limitations
+
+- Native search has no YouTube, Dailymotion or Pinterest source. The SearXNG
+  fallback adds them only when native results are weak.
+- DuckDuckGo Images answers with a JavaScript challenge often enough that
+  image results come mostly from Bing; searchy pauses it for ten minutes
+  each time and does not try to solve the challenge.
+- Wikimedia Commons answers HTTP 429 to fast bursts and recovers within
+  minutes.
+
 ## v1.0.0-alpha.2 - 2026-10-23
 
 Fixes for what alpha.1 got wrong on the primary instance: DuckDuckGo videos
