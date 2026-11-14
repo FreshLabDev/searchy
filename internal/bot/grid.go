@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,9 +87,25 @@ func (h *Handlers) runGridSearch(ctx context.Context, chatID int64, threadID int
 
 	sctx, cancel := context.WithTimeout(ctx, h.requestTimeout)
 	start := time.Now()
-	results, _ := h.agg.Search(sctx, q, cats, 0, search.SearchLanguage(lang))
+	var userID int64
+	if user != nil {
+		userID = user.ID
+	}
+	page, err := h.backend.SearchPage(sctx, search.PageRequest{
+		Query: q, Categories: cats, Language: search.SearchLanguage(lang),
+		UserID: userID, Scope: "grid:" + strconv.FormatInt(chatID, 10) + ":" + strconv.Itoa(threadID),
+		Limit: h.maxResults, WaitAll: true,
+	})
 	cancel()
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	results := page.Results
 	h.recordSearch(user, categoryStr(cats), len(results), int(time.Since(start).Milliseconds()), source)
+	if err != nil {
+		h.replyRetry(ctx, chatID, threadID, lang, i18n.T(lang, searchErrorKey(err)))
+		return
+	}
 
 	if len(results) == 0 {
 		h.replyRetry(ctx, chatID, threadID, lang, i18n.T(lang, "search.nothing", "query", escapeHTML(q)))

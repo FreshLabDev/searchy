@@ -399,7 +399,7 @@ func TestEveryScreenIsBuiltFromTheSharedHelpers(t *testing.T) {
 		}
 	}
 	// The About card is the family's one-line variant: name · version.
-	if !strings.HasPrefix(texts["about"], "<b>Searchy</b> · <i>v") {
+	if !strings.HasPrefix(texts["about"], "<b>searchy</b> · <i>v") {
 		t.Errorf("the About card lost its name · version line: %q", texts["about"])
 	}
 }

@@ -1,6 +1,8 @@
 package bot
 
 import (
+	"errors"
+
 	"github.com/FreshLabDev/tg"
 
 	"searchy/internal/i18n"
@@ -44,7 +46,7 @@ func buildInlineResults(results []search.MediaResult, lang string, downloadURLs 
 }
 
 // videoButtons builds the video card keyboard: an "Open on <platform>" link
-// button (vido style) and an owner-bound Vido download action.
+// button (vido style) and an owner-bound vido download action.
 type downloadButton struct {
 	URL          string
 	CallbackData string
@@ -75,6 +77,33 @@ func promptResult(lang, botUsername string) []tg.InlineQueryResult {
 			InputMessageContent: tg.InputTextMessageContent{
 				MessageText: i18n.T(lang, "help.hint"),
 			},
+		},
+	}
+}
+
+// Backend errors never include the query or cursor in a response or log.
+func searchErrorKey(err error) string {
+	switch {
+	case errors.Is(err, search.ErrExpiredCursor):
+		return "search.expired"
+	case errors.Is(err, search.ErrInvalidCursor):
+		return "search.invalid"
+	case errors.Is(err, search.ErrBusy):
+		return "search.busy"
+	default:
+		return "load.failed"
+	}
+}
+
+func searchErrorResult(lang string, err error) []tg.InlineQueryResult {
+	key := searchErrorKey(err)
+	hint := i18n.T(lang, key)
+	return []tg.InlineQueryResult{
+		tg.InlineQueryResultArticle{
+			ID:                  key,
+			Title:               i18n.T(lang, "search.error_title"),
+			Description:         hint,
+			InputMessageContent: tg.InputTextMessageContent{MessageText: hint},
 		},
 	}
 }

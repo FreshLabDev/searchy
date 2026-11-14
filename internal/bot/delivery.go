@@ -16,7 +16,7 @@ import (
 )
 
 // RunDeliveryWorker claims transport-neutral plans from core and executes only
-// the whitelisted Telegram operations validated by Searchy.
+// the whitelisted Telegram operations validated by searchy.
 func (h *Handlers) RunDeliveryWorker(ctx context.Context) {
 	if h.vido == nil || !h.vido.Ready() {
 		return
@@ -52,7 +52,7 @@ func (h *Handlers) RunDeliveryWorker(ctx context.Context) {
 }
 
 // RunNotificationWorker durably delivers terminal processing status after a
-// Searchy restart. Chat actions remain best-effort; failures and explicit
+// searchy restart. Chat actions remain best-effort; failures and explicit
 // delivery-unknown retry controls do not live only in process memory.
 func (h *Handlers) RunNotificationWorker(ctx context.Context) {
 	if h.vido == nil || !h.vido.Ready() {
@@ -244,7 +244,7 @@ func (h *Handlers) sendOperation(ctx context.Context, delivery *vidobridge.Deliv
 	chatID, threadID := delivery.TargetChatID, delivery.TargetThreadID
 	markup := operationMarkup(op.Buttons)
 	// A plan's captions arrive in a field named caption_html and its text is
-	// Vido's own; the client sends both as HTML, like everything else here.
+	// vido's own; the client sends both as HTML, like everything else here.
 	caption := tg.CaptionOptions{ThreadID: threadID, Caption: op.CaptionHTML, Markup: markup}
 	send := func() ([]tg.Message, error) {
 		switch op.Type {

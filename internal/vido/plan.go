@@ -149,8 +149,8 @@ func validateSource(source Source, cacheRoot string) error {
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("local file escaped shared cache")
 		}
-		// Reject every symlink component before following the path. Searchy mounts
-		// the cache read-only, so Vido cannot replace components after validation;
+		// Reject every symlink component before following the path. searchy mounts
+		// the cache read-only, so vido cannot replace components after validation;
 		// the local Bot API then sees the same canonical cache path.
 		current := cacheRoot
 		for _, part := range strings.Split(rel, string(filepath.Separator)) {

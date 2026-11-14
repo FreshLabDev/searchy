@@ -1,4 +1,4 @@
-// Package searxng implements the bounded SearXNG JSON provider used by Searchy.
+// Package searxng implements the bounded SearXNG JSON provider used by searchy.
 // It sends explicit engine pools only and never sends categories.
 package searxng
 

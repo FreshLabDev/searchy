@@ -1,6 +1,6 @@
 # Changelog
 
-All notable Searchy changes are documented here.
+All notable searchy changes are documented here.
 
 The `## <tag>` section of this file *is* the GitHub Release body: the release
 workflow copies it verbatim and refuses a tag that has no section. Write it
@@ -11,7 +11,145 @@ See [`docs/versioning.md`](docs/versioning.md) for what the numbers mean and
 
 ## Unreleased
 
-Use this section for changes that are merged but not released yet.
+## v1.0.0 - 2026-11-14
+
+searchy searches by itself. The private SearXNG instance is no longer needed:
+Bing, DuckDuckGo and Wikimedia are queried directly from Go, the first page
+arrives while slower sources are still running, and inline scrolling goes
+ten pages deep. This is `v1.0.0-alpha.2`, which has run the primary bot since
+23 October, plus a Go security update. Coming from `v0.2.3`, read both alphas
+under this section; the two things an operator has to act on are below.
+
+Since 23 October alpha.2 answered 350 inline searches from 13 people, 18 in
+DMs and 1 in a group, with no errors logged. The results people picked came
+from Bing images (62), DuckDuckGo videos (30), Bing videos (25), DuckDuckGo
+images (18) and Wikimedia (3).
+
+### Breaking
+
+- **Operators.** The default backend is native search, not SearXNG. Set
+  `SEARCH_BACKEND=searxng` to keep the old one. See `v1.0.0-alpha.1`.
+- **Operators.** `INLINE_CACHE_TIME` defaults to `60` seconds. If `.env` sets
+  it explicitly, lower it to `60` or remove the line. See `v1.0.0-alpha.2`.
+
+### Security
+
+- Go moves from 1.26.10 to 1.26.11: a crafted HTTP/1 request could crash
+  the server through a race on the `MaxBytesReader` header (GO-2026-6859).
+  This update went into the stable version without an alpha of its own; it
+  changes no code of searchy's, and the tests and `govulncheck` pass on it.
+
+### Known Limitations
+
+- Native search has no YouTube, Dailymotion or Pinterest source. The SearXNG
+  fallback adds them only when native results are weak.
+- DuckDuckGo Images answers with a JavaScript challenge often enough that
+  image results come mostly from Bing; searchy pauses it for ten minutes
+  each time and does not try to solve the challenge.
+- Wikimedia Commons answers HTTP 429 to fast bursts and recovers within
+  minutes.
+
+## v1.0.0-alpha.2 - 2026-10-23
+
+Fixes for what alpha.1 got wrong on the primary instance: DuckDuckGo videos
+were all dropped, inline scrolling stopped early, Telegram's cache was off for
+most image searches, and a search could expire while it was being scrolled.
+
+### Changed
+
+- `INLINE_CACHE_TIME` now defaults to `60` seconds instead of `300`, so a first
+  page that Telegram serves from its own cache cannot outlive the search session
+  behind its `next_offset`. **If `.env` sets `INLINE_CACHE_TIME` explicitly,
+  lower it to `60` or remove the line**, otherwise the next scroll after five
+  minutes can answer "search expired". This also applies to
+  `SEARCH_BACKEND=searxng`.
+- The bot writes its name in lowercase in the menu, the about panel and the
+  greeting in all 16 languages: "Hi! This is searchy".
+
+### Fixed
+
+- DuckDuckGo Videos returns results again. Its covers come from Bing's
+  thumbnail service as `/th/id/…` links, which the JPEG check accepted only in
+  the `/th?id=…` form, so every DuckDuckGo video was dropped and video search
+  relied on Bing alone. Both now return about 50 videos per query.
+- When DuckDuckGo answers with a 202 challenge, that category is skipped for
+  ten minutes and no longer marks the page degraded. DuckDuckGo Images gets
+  the challenge on every request, so in alpha.1 almost every search that
+  included images was sent with `cache_time` 1. In a 36-query `searchbench`
+  run, degraded first pages went from 15 to 6.
+- Inline scrolling goes ten pages deep, 240 results at the default page size.
+  alpha.1 stopped after about 50. `MAX_RESULTS` still sets the page size.
+  `CACHE_SIZE` bounds all sessions together: at the default `2048`, about eight
+  searches scrolled to the end fit before the oldest idle ones are dropped.
+- A search session lives `CACHE_TTL` from the last scroll, not from the first
+  query, so scrolling near the end of the window no longer returns "search
+  expired". A new query never reuses a session older than `CACHE_TTL`.
+- A first page sent while a slower source is still running is no longer marked
+  degraded. Only a source that failed sets `cache_time` to 1.
+- `SEARCH_MAX_CONCURRENT` now also limits simultaneous requests to sources.
+  Values above 8 had no effect on them.
+
+### Removed
+
+- The `f:` prefix. It did exactly what an ordinary query does, and the help
+  text in every language presented it as a separate mode. `f: cats` is now
+  searched as typed.
+
+### Known Limitations
+
+- DuckDuckGo Images answers every request with an HTTP 202 JavaScript
+  challenge, so image results come from Bing and Wikimedia only. The SearXNG
+  `duckduckgo images` engine returned almost nothing in the October 22
+  comparison runs as well. searchy does not try to solve the challenge.
+- Compared with the SearXNG backend, native search has no YouTube, Dailymotion
+  or Pinterest source. SearXNG fallback adds them only when native results are
+  weak.
+- Wikimedia Commons answers HTTP 429 to a fast burst of requests, such as a
+  `searchbench` run, and recovers within minutes.
+- Inline paging, DM and group search and the full vido delivery matrix have
+  still not been checked live in Telegram. CI and mocked tests do not cover
+  those flows.
+
+## v1.0.0-alpha.1 - 2026-10-23
+
+### Breaking
+
+- The default backend changes from private SearXNG to native Go metasearch.
+  Set `SEARCH_BACKEND=searxng` to retain the previous backend. In native mode,
+  `CACHE_SIZE` counts retained results, including frozen pages, rather than
+  legacy cache entries.
+
+### Changed
+
+- Native Go metasearch is the default backend: direct Bing and DuckDuckGo
+  images/videos, plus Wikimedia images. No AI model or separate Python search
+  service is required. The existing SearXNG backend remains available with
+  `SEARCH_BACKEND=searxng` for a compatible switchback.
+- Native inline retrieval collects a partial first page, freezes returned
+  cards, and adds later results through stable opaque pagination. Telegram's
+  already-answered inline picker is not updated in place. DM/group grids and
+  owner-bound Vido delivery keep their existing behavior.
+- `f:` explicitly selects the same fast, non-AI search as an ordinary query.
+  Combine it with `i:` or `v:` in either order, including in `/search`.
+- Native search defaults to an `800ms` first-page collection window and `3.5s`
+  source budget, with up to eight concurrent searches. Optional SearXNG fallback
+  stays within the overall `8s` request budget; `SEARCH_FALLBACK=none` disables
+  it. These are operating budgets, not measured production latency guarantees.
+- Result caches and pagination sessions are bounded in memory with a default
+  five-minute TTL. Raw query text stays out of sessions, logs, and databases;
+  partial/degraded responses are not cached as complete healthy results.
+- Local Compose retains private SearXNG for fallback and rollback without public
+  ports. Native-only startup can run just the bot. Search needs no new database.
+
+### Known Limitations
+
+- This alpha is intended for owner-directed testing on the primary Searchy
+  instance. Actual Telegram inline/media delivery and the full Vido delivery
+  matrix remain to be verified after rollout; CI and mocked integration tests
+  do not prove those live flows.
+- DuckDuckGo Images can return an HTTP 202 challenge. Other native sources can
+  still produce partial results; the optional private SearXNG fallback covers
+  weak or empty initial retrieval within the overall search budget.
 
 ## v0.2.3 - 2026-10-20
 

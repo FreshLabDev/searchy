@@ -1,7 +1,7 @@
 # Release Process
 
 Every Asterfield repository releases the same way. This document is identical in
-all of them; only the verification section is specific to Searchy.
+all of them; only the verification section is specific to searchy.
 
 See [`versioning.md`](versioning.md) for what the numbers mean and why
 pre-releases are tagged on `dev` and stable versions on `main`.
@@ -221,8 +221,8 @@ For `beta`, `rc`, and stable, a real smoke test:
 
 - inline image and video cards plus pagination;
 - DM and group numbered grids;
-- selector Download delivery from Searchy in the same chat/topic;
-- another group member's Download handoff to a private Vido job;
-- inline Download handoff to Vido DM;
+- selector Download delivery from searchy in the same chat/topic;
+- another group member's Download handoff to a private vido job;
+- inline Download handoff to vido DM;
 - audio follow-up, terminal downloader error, and cached `file_id` reuse;
 - a newly delivered production bridge row with `target_bot=searchy`.

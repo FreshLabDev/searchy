@@ -26,24 +26,40 @@ enabled for the bot in BotFather (`/setinline`) or these updates never arrive.
 
 - Results are `InlineQueryResultPhoto` cards: images as their photo, and videos
   as a cover photo with an "Open on <platform>" link and a "Download" URL button
-  leading to an owner-bound Vido private-chat job. Telegram does not expose the
-  destination chat to Vido, so inline mode never attempts direct delivery into
+  leading to an owner-bound vido private-chat job. Telegram does not expose the
+  destination chat to vido, so inline mode never attempts direct delivery into
   the chosen chat.
 - Up to `MAX_RESULTS` (Telegram's hard cap of 50) results per answer, with a
-  `next_offset` page index to load more as the user scrolls (bounded to 10
-  pages).
+  `next_offset` to load more as the user scrolls. Native uses an opaque cursor
+  bound to the current search and user; replay returns the same frozen page.
+  The explicit SearXNG backend retains its legacy numeric paging.
+- Native retrieval is incremental internally. Late source results enter later
+  pages; the bot does not push additional cards into an already-answered inline
+  picker or reorder cards already returned. Invalid/expired native cursors are
+  handled explicitly; starting a fresh query starts a new search.
 - Queries are debounced per user; a superseded keystroke is cancelled before it
   reaches the backend.
 - An empty query returns a short prompt; a query with no results returns a single
   "nothing found" article.
 
-### Category prefixes
+### Search prefixes
 
 | You type | Searches |
 |:--|:--|
 | `cats` | images and videos |
 | `i:cats` | images only |
 | `v:cats` | videos only |
+
+Prefixes are read only at the start and work in inline search, DM text and
+`/search`. Ordinary query text is not rewritten.
+
+### Media compatibility
+
+Inline images and video covers are sent as `InlineQueryResultPhoto`, so Telegram
+has to fetch a public HTTPS JPEG and a thumbnail by itself. WebP, SVG, GIF and PNG
+open in a browser but are not accepted here. Native sources drop such formats or
+use the provider's JPEG preview. To check a card, pick it and send it in
+Telegram: the inline picker showing a thumbnail is not enough.
 
 ## DM and Group Search
 
@@ -64,10 +80,10 @@ image as a photo, a video as a cover card with the same Open/Download buttons.
 Grid buttons are **shared** — in a group, anyone can page or open an item, so
 there is no per-user ownership check on them.
 
-The user who selected a video owns its Searchy delivery callback and receives a
-new Searchy message in the same chat/topic. If another group member presses the
-same Download button, Core validates the exact card and Searchy opens a newly
-owner-bound Vido deep link for that person. Nothing extra is posted in the
+The user who selected a video owns its searchy delivery callback and receives a
+new searchy message in the same chat/topic. If another group member presses the
+same Download button, Core validates the exact card and searchy opens a newly
+owner-bound vido deep link for that person. Nothing extra is posted in the
 group.
 
 ## The Menu

@@ -1,11 +1,15 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSearchDefaults(t *testing.T) {
 	for _, key := range []string{
 		"ENGINES_IMAGES", "ENGINES_VIDEOS", "ENGINES_IMAGES_DISCOVERY", "ENGINES_VIDEOS_DISCOVERY",
 		"LANGUAGE", "REQUEST_TIMEOUT", "DISCOVERY_PERCENT", "DISCOVERY_WEAK_PERCENT",
+		"SEARCH_BACKEND", "SEARCH_FALLBACK", "NATIVE_TIMEOUT", "NATIVE_FIRST_PAGE_WAIT", "SEARCH_MAX_CONCURRENT",
 	} {
 		t.Setenv(key, "")
 	}
@@ -28,6 +32,46 @@ func TestSearchDefaults(t *testing.T) {
 	}
 	if config.RequestTimeout.String() != "8s" {
 		t.Errorf("request timeout = %s", config.RequestTimeout)
+	}
+	if config.SearchBackend != "native" || config.SearchFallback != "searxng" || config.NativeTimeout.String() != "3.5s" || config.NativeFirstPageWait.String() != "800ms" || config.SearchMaxConcurrent != 8 {
+		t.Fatal("unexpected native search defaults")
+	}
+}
+
+func TestNativeSearchConfigRejectsUnsafeBudgets(t *testing.T) {
+	for _, test := range []struct{ key, value string }{
+		{"SEARCH_BACKEND", "unknown"}, {"SEARCH_FALLBACK", "unknown"},
+		{"NATIVE_TIMEOUT", "-1s"}, {"NATIVE_TIMEOUT", "bad"},
+		{"NATIVE_FIRST_PAGE_WAIT", "4s"}, {"REQUEST_TIMEOUT", "1s"},
+		{"SEARCH_MAX_CONCURRENT", "0"}, {"SEARCH_MAX_CONCURRENT", "129"}, {"SEARCH_MAX_CONCURRENT", "no"},
+		{"CACHE_SIZE", "0"}, {"CACHE_TTL", "-1s"},
+	} {
+		t.Run(test.key+"="+test.value, func(t *testing.T) {
+			t.Setenv("BOT_TOKEN", "test-token")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(); err == nil {
+				t.Fatal("invalid search configuration was accepted")
+			}
+		})
+	}
+}
+
+func TestLegacyBackendAllowsIndependentTimeout(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "test-token")
+	t.Setenv("SEARCH_BACKEND", " SEARXNG ")
+	t.Setenv("REQUEST_TIMEOUT", "1s")
+	c, err := Load()
+	if err != nil || c.SearchBackend != "searxng" {
+		t.Fatalf("legacy selection rejected: %v", err)
+	}
+}
+
+func TestConfigErrorsNeverEchoSecretValues(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "secret-token-value")
+	t.Setenv("SEARCH_BACKEND", "invalid")
+	_, err := Load()
+	if err == nil || strings.Contains(err.Error(), "secret-token-value") {
+		t.Fatal("expected safe configuration error")
 	}
 }
 
