@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM golang:1.26.11-alpine AS build
+FROM golang:1.27.0-alpine AS build
 WORKDIR /src
 
 # Cache deps first.
